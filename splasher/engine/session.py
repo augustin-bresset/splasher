@@ -33,28 +33,35 @@ class Session:
     """State + operations of a labeling session, drivable by any front."""
 
     def __init__(self, source: Source, labelset: LabelSet | None = None) -> None:
-        self.source = source
         self.labelset = labelset or LabelSet.default()
-        self.index = 0
+        self.tool: Tool = "paint"
+        self.bev_mode = "height"   # BEV underlay: "height" | "intensity" | "density" | "normal"
+        self.active_targets: set[str] = {"grid"}
+        paintable = self.labelset.paintable
+        self.active_class = paintable[0].id if paintable else self.labelset.ignore_id
+        self.set_source(source)
 
+    def set_source(self, source: Source, keep_grid: bool = False) -> None:
+        """(Re)bind the dataset source and reset cloud-derived state.
+
+        With `keep_grid` the grid **and its labels persist** (the BEV grid is independent of
+        any single lidar): a file-viewer can swap/combine the displayed cloud as a reference
+        without wiping the labeling. The point target is always reset (it is cloud-sized).
+        """
+        self.source = source
+        self.index = 0
         self.cloud_keys = channels_of_kind(source, ChannelKind.POINTCLOUD)
         self.image_keys = channels_of_kind(source, ChannelKind.IMAGE)
         pose_keys = channels_of_kind(source, ChannelKind.POSE)
         self.pose_key = pose_keys[0] if pose_keys else None
-
         self.accum_radius = 0
-        self.bev_mode = "height"   # BEV underlay field: "height" | "density" | "intensity"
         self.visible_clouds: set[str] = set(self.cloud_keys)
         self.visible_images: set[str] = set(self.image_keys)
-        self.tool: Tool = "paint"
-        self.selection: np.ndarray | None = None  # (rows, cols) bool mask, or None
-        paintable = self.labelset.paintable
-        self.active_class = paintable[0].id if paintable else self.labelset.ignore_id
-
-        self.grid = self._default_grid()
-        self.grid_target = GridTarget(self.grid, ignore_id=self.labelset.ignore_id)
+        self.selection: np.ndarray | None = None
+        if not keep_grid:
+            self.grid = self._default_grid()
+            self.grid_target = GridTarget(self.grid, ignore_id=self.labelset.ignore_id)
         self.point_target = PointTarget(ignore_id=self.labelset.ignore_id)
-        self.active_targets: set[str] = {"grid"}
 
     # ================================================================ info
     def info(self) -> SessionInfo:
@@ -103,7 +110,7 @@ class Session:
         self.accum_radius = max(0, min(int(radius), cap))
 
     def set_bev_mode(self, mode: str) -> None:
-        self.bev_mode = mode if mode in ("height", "density", "intensity") else "height"
+        self.bev_mode = mode if mode in ("height", "density", "intensity", "normal") else "height"
 
     def set_labelset(self, data: dict) -> None:
         """Replace the labeling class set (ids/names/colors). `ignore_id` stays the unlabeled id.

@@ -70,6 +70,20 @@ def open_file(path: str) -> dict:
     raise ValueError(f"unsupported format: {ext or p.name}")
 
 
+def combine_clouds(clouds: list[np.ndarray]) -> np.ndarray:
+    """Concatenate clouds into a single `(M, 4)` array [x, y, z, intensity] (0 if absent)."""
+    total = sum(len(c) for c in clouds)
+    out = np.zeros((total, 4), dtype=np.float32)
+    k = 0
+    for c in clouds:
+        n = len(c)
+        out[k:k + n, :3] = c[:, :3]
+        if c.shape[1] >= 4:
+            out[k:k + n, 3] = c[:, 3]
+        k += n
+    return out
+
+
 def _load_cloud(p: Path, ext: str) -> np.ndarray:
     if ext == ".npy":
         arr = np.asarray(np.load(p))

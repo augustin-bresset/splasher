@@ -9,9 +9,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ..core.array_source import ArraySource
 from ..core.grid import Grid
+from ..core.source import ChannelKind, ChannelSpec
 from ..engine.session import Session
-from .files import list_dir, open_file
+from .files import combine_clouds, list_dir, open_file
 from .protocol import encode_array, grid_from_dict, session_info_to_dict, view_state_to_dict
 
 # Web front (vanilla, zero build) served as-is — `web/` directory at the repo root.
@@ -161,6 +163,18 @@ def create_app(session_or_source, *, labels=None):
         out = session.save(payload["dir"])
         return {"ok": True, "dir": str(out)}
 
+    @app.post("/api/export")
+    def export_bev(payload: dict = Body(...)) -> dict:
+        """Export the current BEV grid raster as a single .npy file."""
+        import numpy as np
+
+        out = _Path(payload["dir"]).expanduser() / payload["name"]
+        if out.suffix != ".npy":
+            out = out.with_suffix(".npy")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        np.save(out, session.grid_target.raster(session.index))
+        return {"ok": True, "path": str(out)}
+
     @app.post("/api/load")
     def load(payload: dict = Body(...)) -> dict:
         try:
@@ -197,6 +211,29 @@ def create_app(session_or_source, *, labels=None):
         if not p.is_file():
             raise HTTPException(404, "not a file")
         return FileResponse(str(p))
+
+    @app.post("/api/source/files")
+    def set_source_files(payload: dict = Body(...)) -> dict:
+        """File-viewer: make the selected cloud files the (labelable) session source.
+
+        Combines them into one frame so the BEV grid + labeling work on the loaded cloud(s).
+        """
+        clouds = []
+        for path in payload.get("paths", []):
+            try:
+                res = open_file(path)
+            except (FileNotFoundError, ValueError, OSError):
+                continue
+            if res.get("kind") == "cloud":
+                clouds.append(res["points"])
+        keep = session.grid_labelled_count() > 0   # once you've labeled, the grid is locked
+        if not clouds:
+            session.set_source(ArraySource([], []), keep_grid=keep)
+            return view()
+        pts = combine_clouds(clouds)
+        spec = ChannelSpec("lidar", ChannelKind.POINTCLOUD, pts.dtype, (None, pts.shape[1]))
+        session.set_source(ArraySource([spec], [{"lidar": pts}]), keep_grid=keep)
+        return view()
 
     # Web front mounted last (on "/"): the /api/* and /docs routes, registered before,
     # keep priority. `html=True` serves index.html at the root.

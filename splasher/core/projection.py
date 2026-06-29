@@ -64,11 +64,13 @@ def bev_mean_intensity(points: np.ndarray, grid: Grid) -> np.ndarray:
 
 
 def bev_field(points: np.ndarray, grid: Grid, mode: str = "height") -> np.ndarray:
-    """BEV scalar field for the chosen `mode`: 'height' | 'density' | 'intensity'."""
+    """BEV scalar field for `mode`: 'height' | 'intensity' | 'density' | 'normal' (no underlay)."""
     if mode == "density":
         return bev_count(points, grid)
     if mode == "intensity":
         return bev_mean_intensity(points, grid)
+    if mode == "normal":
+        return np.full(grid.shape, np.nan, dtype=np.float64)  # no scalar underlay, points only
     return bev_max_height(points, grid)
 
 
