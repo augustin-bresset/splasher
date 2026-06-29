@@ -1,4 +1,21 @@
+---
+title: Splasher
+emoji: 💦
+colorFrom: indigo
+colorTo: blue
+sdk: docker
+app_port: 7860
+pinned: false
+license: mit
+short_description: Label synchronized 3D/image channels into a 2D BEV grid
+---
+
 # Splasher
+
+> **Live demo** — this Hugging Face Space runs `splasher demo --serve` (the synthetic
+> source) inside a Docker container. The 3D cloud, camera and BEV grid are all interactive.
+> Note: the demo serves a **single shared session**, so concurrent visitors edit the same
+> grid. See the [GitHub repo](https://github.com/augustin-bresset/splasher) to run it locally.
 
 A **labeling** tool with a generic core: you give it a *synchronous dataset* — at each
 timestamp, a **pack of named channels** (3D point cloud, camera image, pose, …) — and you

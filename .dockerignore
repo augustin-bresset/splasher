@@ -1,0 +1,14 @@
+# Keep the build context small and reproducible.
+.git
+.github
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+tests
+examples
+*.md
+!README.md
+.claude
+.DS_Store
