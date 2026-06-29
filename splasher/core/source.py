@@ -7,9 +7,10 @@ requires. apairo, files, in-memory arrays… are just ways to produce a `Source`
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Iterable, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 import numpy as np
 

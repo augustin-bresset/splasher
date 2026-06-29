@@ -74,16 +74,16 @@ class LabelSet:
         Path(path).write_text(json.dumps(self.to_dict(), indent=2, ensure_ascii=False))
 
     @classmethod
-    def from_dict(cls, d: dict) -> "LabelSet":
+    def from_dict(cls, d: dict) -> LabelSet:
         classes = [LabelClass(c["id"], c["name"], tuple(c["color"])) for c in d["classes"]]
         return cls(classes, ignore_id=d.get("ignore_id", 0))
 
     @classmethod
-    def load(cls, path: str | Path) -> "LabelSet":
+    def load(cls, path: str | Path) -> LabelSet:
         return cls.from_dict(json.loads(Path(path).read_text()))
 
     @classmethod
-    def default(cls) -> "LabelSet":
+    def default(cls) -> LabelSet:
         """Minimal default set (fully editable). 0 = unlabeled, then a couple of classes."""
         return cls(
             [

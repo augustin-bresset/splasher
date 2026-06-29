@@ -11,9 +11,9 @@ Three layers, from most generic to most specific:
 
 from __future__ import annotations
 
-from .core.source import ChannelKind, ChannelSpec, Frame, Source, channels_of_kind
 from .core.array_source import ArraySource
 from .core.grid import Grid, grid_from_points
+from .core.source import ChannelKind, ChannelSpec, Frame, Source, channels_of_kind
 from .engine import Session, SessionInfo, ViewState
 
 __version__ = "0.1.0"

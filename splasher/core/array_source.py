@@ -6,7 +6,7 @@ that already produces arrays. No hidden I/O.
 
 from __future__ import annotations
 
-from typing import Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
 import numpy as np
 

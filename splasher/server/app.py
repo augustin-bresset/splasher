@@ -10,7 +10,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..core.array_source import ArraySource
-from ..core.grid import Grid
 from ..core.source import ChannelKind, ChannelSpec
 from ..engine.session import Session
 from .files import combine_clouds, list_dir, open_file
@@ -95,7 +94,7 @@ def create_app(session_or_source, *, labels=None):
         try:
             session.set_labelset(payload)
         except (KeyError, TypeError, ValueError) as e:
-            raise HTTPException(422, f"invalid labelset: {e}")
+            raise HTTPException(422, f"invalid labelset: {e}") from e
         return view()
 
     @app.post("/api/visibility")
@@ -154,7 +153,7 @@ def create_app(session_or_source, *, labels=None):
         try:
             grid = grid_from_dict(payload)
         except (KeyError, ValueError) as e:
-            raise HTTPException(422, f"invalid grid: {e}")
+            raise HTTPException(422, f"invalid grid: {e}") from e
         session.commit_grid(grid)
         return view()
 
@@ -180,7 +179,7 @@ def create_app(session_or_source, *, labels=None):
         try:
             session.load(payload["dir"])
         except (FileNotFoundError, OSError) as e:
-            raise HTTPException(404, f"cannot load: {e}")
+            raise HTTPException(404, f"cannot load: {e}") from e
         return view()
 
     # ----------------------------------------------------------- file viewer (browse + open)
@@ -189,14 +188,14 @@ def create_app(session_or_source, *, labels=None):
         try:
             return list_dir(path)
         except (FileNotFoundError, NotADirectoryError, PermissionError, OSError) as e:
-            raise HTTPException(400, str(e))
+            raise HTTPException(400, str(e)) from e
 
     @app.post("/api/fs/open")
     def fs_open(payload: dict = Body(...)) -> dict:
         try:
             res = open_file(payload["path"])
         except (FileNotFoundError, ValueError, OSError) as e:
-            raise HTTPException(422, str(e))
+            raise HTTPException(422, str(e)) from e
         if res["kind"] == "cloud":
             return {"kind": "cloud", "name": res["name"], "path": res["path"],
                     "points": encode_array(res["points"])}

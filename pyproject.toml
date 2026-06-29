@@ -42,7 +42,15 @@ app = [
 splasher = "splasher.cli:main"
 
 [dependency-groups]
-dev = ["pytest", "httpx"]  # httpx: required by fastapi.testclient (API tests)
+dev = ["pytest", "httpx", "ruff"]  # httpx: required by fastapi.testclient (API tests)
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["B008"]  # `= Body(...)` in defaults is the intended FastAPI idiom
 
 [build-system]
 requires = ["hatchling"]

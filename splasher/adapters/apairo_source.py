@@ -61,7 +61,8 @@ class ApairoSource:
 
         dropped = [k for k in requested if k not in found]
         if dropped:
-            warnings.warn(f"apairo: channels absent from the synchronized samples, skipped: {dropped}")
+            warnings.warn(f"apairo: channels absent from the synchronized samples, skipped: {dropped}",
+                          stacklevel=2)
         self._keys = [k for k in requested if k in found]   # keep order, only present ones
         return [found[k] for k in self._keys]
 
@@ -80,7 +81,7 @@ class ApairoSource:
     def from_path(cls, path: str, *, keys: list[str] | None = None,
                   reference: str | None = None, tolerance: float = 0.1,
                   split: str | None = None, start: int = 0,
-                  count: int | None = None) -> "ApairoSource":
+                  count: int | None = None) -> ApairoSource:
         """Open an apairo `RawDataset`, synchronize/split/window it, and wrap it.
 
         `split` selects a built-in split (`ds.split(name)`); `start`/`count` keep a frame

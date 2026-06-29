@@ -121,7 +121,7 @@ def _load_pcd_ascii(p: Path) -> np.ndarray:
     try:
         xi, yi, zi = fields.index("x"), fields.index("y"), fields.index("z")
     except ValueError:
-        raise ValueError("PCD has no x/y/z fields")
+        raise ValueError("PCD has no x/y/z fields") from None
     rows = []
     for line in lines[data_at:]:
         parts = line.split()
