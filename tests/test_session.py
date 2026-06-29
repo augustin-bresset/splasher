@@ -116,6 +116,22 @@ def test_commit_grid_resets_grid_labels_only(session: Session) -> None:
     assert (session.view_state().point_labels == session.active_class).any()
 
 
+def test_set_source_keep_grid_preserves_labels(session: Session) -> None:
+    from splasher import ArraySource
+    from splasher.core.source import ChannelKind, ChannelSpec
+
+    session.paint_rect((-5.0, -5.0, 5.0, 5.0))
+    before = session.view_state().grid_labels.copy()
+    spec = ChannelSpec("lidar", ChannelKind.POINTCLOUD, np.dtype("float32"), (None, 4))
+    new = ArraySource([spec], [{"lidar": np.random.rand(10, 4).astype(np.float32)}])
+
+    session.set_source(new, keep_grid=True)               # reference swap: grid + labels persist
+    assert np.array_equal(session.view_state().grid_labels, before)
+
+    session.set_source(new, keep_grid=False)              # full reset
+    assert session.grid_labelled_count() == 0
+
+
 def test_save_load_roundtrip(session: Session, tmp_path) -> None:
     session.set_active_targets({"grid", "points"})
     session.paint_rect((-5.0, -5.0, 5.0, 5.0))

@@ -89,6 +89,14 @@ def test_file_viewer_empty_session_and_fs(tmp_path) -> None:
     bad = c.post("/api/fs/open", json={"path": str(tmp_path / "note.txt")})
     assert bad.status_code == 422 and "unsupported" in bad.json()["detail"]
 
+    # loaded cloud becomes the labelable session source; grid labels then export to a file
+    src = c.post("/api/source/files", json={"paths": [str(tmp_path / "scan.npy")]}).json()
+    assert decode_array(src["points"]).shape[0] == 20
+    c.post("/api/paint", json={"rect": [-100, -100, 100, 100]})
+    r = c.post("/api/export", json={"dir": str(tmp_path), "name": "scan_bev.npy"})
+    assert r.status_code == 200 and r.json()["path"].endswith("scan_bev.npy")
+    assert (tmp_path / "scan_bev.npy").exists()
+
 
 def test_save_load_via_api(client: TestClient, tmp_path) -> None:
     client.post("/api/paint", json={"rect": [-5, -5, 5, 5]})
