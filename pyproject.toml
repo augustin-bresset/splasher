@@ -5,11 +5,9 @@ description = "Labélisation : canaux synchronisés (nuages 3D, images) -> grill
 readme = "README.md"
 authors = [{ name = "Augustin Bresset", email = "augustin.bresset@gmail.com" }]
 requires-python = ">=3.11"
+# Le cœur + le moteur ne dépendent que de numpy. Les fronts sont des extras.
 dependencies = [
     "numpy",
-    "pyqtgraph",
-    "PySide6",
-    "PyOpenGL",
 ]
 
 # apairo n'est qu'UN adaptateur d'entrée optionnel — le cœur n'en dépend pas.
@@ -18,12 +16,25 @@ apairo = [
     "apairo @ git+https://github.com/apairo-robotics/apairo.git",
     "PyYAML",
 ]
+# Serveur web + API (le moteur `splasher.engine` n'en dépend pas).
+api = [
+    "fastapi",
+    "uvicorn",
+]
+# Desktop app: the web front inside a native webview (Spotify-style).
+# pywebview[qt] pulls a pip-only Qt WebEngine (Chromium) backend so a real native
+# window opens out of the box on Linux (no system GTK/WebKit packages needed).
+app = [
+    "fastapi",
+    "uvicorn",
+    "pywebview[qt]",
+]
 
 [project.scripts]
 splasher = "splasher.cli:main"
 
 [dependency-groups]
-dev = ["pytest"]
+dev = ["pytest", "httpx"]  # httpx : requis par fastapi.testclient (tests API)
 
 [build-system]
 requires = ["hatchling"]

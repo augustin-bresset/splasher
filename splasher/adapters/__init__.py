@@ -1,1 +1,1 @@
-"""Adaptateurs d'entrée optionnels (apairo, …). Aucun n'est requis par le cœur."""
+"""Optional input adapters (apairo, …). None is required by the core."""
