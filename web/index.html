@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="aqua">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Splasher</title>
+  <link rel="stylesheet" href="./style.css" />
+  <!-- Three.js hosted locally (web/vendor): works offline. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three/three.module.js",
+      "three/addons/": "./vendor/three/addons/"
+    }
+  }
+  </script>
+  <script type="module" src="./src/app.js"></script>
+</head>
+<body>
+  <div id="app">
+    <!-- ======================= top bar ======================= -->
+    <header class="topbar">
+      <div class="brand">
+        <svg class="ripple" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+          <circle cx="12" cy="12" r="2.5" />
+          <circle cx="12" cy="12" r="6" />
+          <circle cx="12" cy="12" r="9.5" />
+        </svg>
+        <svg class="pixelwave" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" shape-rendering="crispEdges">
+          <rect class="foam" x="6" y="3" width="3" height="3" />
+          <rect x="0" y="12" width="3" height="3" />
+          <rect x="3" y="9" width="3" height="3" />
+          <rect x="6" y="6" width="3" height="3" />
+          <rect x="9" y="9" width="3" height="3" />
+          <rect x="12" y="12" width="3" height="3" />
+          <rect x="15" y="15" width="3" height="3" />
+          <rect x="18" y="18" width="3" height="3" />
+          <rect x="21" y="15" width="3" height="3" />
+        </svg>
+        Splasher
+      </div>
+
+      <div class="toolgroup">
+        <button id="tool-select" class="tbtn"
+                title="Selection mode — drag: add cells, right-drag: remove, then apply">⬚ Select</button>
+        <button id="btn-apply-sel" class="tbtn" disabled>✓ Apply</button>
+        <button id="btn-clear-sel" class="tbtn" disabled>✗ Clear</button>
+      </div>
+
+      <div class="toolgroup">
+        <button id="btn-clear" class="tbtn">Clear frame</button>
+        <button id="btn-undo" class="tbtn" title="Ctrl+Z">↶ Undo</button>
+      </div>
+
+      <div class="toolgroup">
+        <span class="muted">target</span>
+        <button id="target-grid" class="tbtn active" title="Output: BEV grid raster">▦ Grid</button>
+        <button id="target-points" class="tbtn" title="Output: per-point labels">• Points</button>
+      </div>
+
+      <div class="spacer"></div>
+      <div id="status" class="status"></div>
+      <select id="theme" class="theme-select" title="Color theme"></select>
+    </header>
+
+    <!-- ======================= body: rail | workspace ======================= -->
+    <div class="body">
+      <aside class="rail">
+        <section class="panel">
+          <h2>Classes <button id="classes-edit" class="icon-btn" title="Edit classes">⚙</button></h2>
+          <div id="classes" class="classes"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Clouds (BEV)</h2>
+          <div id="clouds" class="channels"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Grid</h2>
+          <div class="grid-form">
+            <label>x min <input id="g-xmin" type="number" step="1" /></label>
+            <label>x max <input id="g-xmax" type="number" step="1" /></label>
+            <label>y min <input id="g-ymin" type="number" step="1" /></label>
+            <label>y max <input id="g-ymax" type="number" step="1" /></label>
+            <label>cell (m) <input id="g-cell" type="number" step="0.5" min="0.05" /></label>
+          </div>
+          <div id="g-dims" class="dims"></div>
+          <button id="btn-newgrid" class="btn-primary">➕ New grid</button>
+        </section>
+
+        <section class="panel" id="accum-panel"
+                 title="Accumulate ±N neighboring frames, registered by pose into the current frame">
+          <h2>Accumulate <span id="accum-val" class="muted">±0</span></h2>
+          <input id="accum" type="range" min="0" max="0" value="0" />
+        </section>
+
+        <section class="panel">
+          <h2>Session</h2>
+          <input id="io-dir" type="text" placeholder="folder (server path)" />
+          <div class="row">
+            <button id="btn-save" class="btn">Save</button>
+            <button id="btn-load" class="btn">Load</button>
+          </div>
+        </section>
+      </aside>
+
+      <div class="gutter gutter-v" data-gutter="rail"></div>
+
+      <!-- workspace: BEV | column of views (3D / cameras), resizable -->
+      <div class="workspace">
+        <section class="vpanel bev-panel">
+          <div class="vpanel-head"><span class="vpanel-title">Top-down (BEV)</span>
+            <select id="bev-mode" title="BEV underlay">
+              <option value="height">Height</option>
+              <option value="density">Density</option>
+              <option value="intensity">Intensity</option>
+            </select>
+            <span id="bev-hint" class="muted"></span></div>
+          <div id="bev-stage" class="vpanel-body bev-stage"></div>
+        </section>
+
+        <div class="gutter gutter-v" data-gutter="bev"></div>
+
+        <div class="views" id="views">
+          <div class="addbar">
+            <select id="add-kind"></select>
+            <button id="add-view" class="btn">+ Add view</button>
+            <button id="open-file" class="btn">Open file…</button>
+          </div>
+          <div class="views-stack" id="views-stack"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ======================= timeline (footer) ======================= -->
+    <footer class="footer">
+      <button id="btn-play" class="tbtn">▶</button>
+      <input id="frame" type="range" min="0" max="0" value="0" />
+      <input id="frame-num" type="number" min="1" class="frame-num" title="Jump to frame" />
+      <span id="frame-label" class="muted">frame 1 / 1</span>
+    </footer>
+  </div>
+
+  <!-- ======================= class editor (modal) ======================= -->
+  <div id="modal" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-head"><span>Edit labeling classes</span>
+        <button id="modal-close" class="icon-btn">✕</button></div>
+      <p class="hint">Class 0 is always “unlabeled”. Edit names/colors, add or remove classes.</p>
+      <div id="class-editor" class="class-editor"></div>
+      <button id="class-add" class="btn">+ Add class</button>
+      <div class="modal-actions">
+        <button id="class-cancel" class="btn">Cancel</button>
+        <button id="class-save" class="btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================= file browser (modal) ======================= -->
+  <div id="fs-modal" class="modal-overlay" hidden>
+    <div class="modal fs-box">
+      <div class="modal-head"><span>Open file</span>
+        <button id="fs-close" class="icon-btn">✕</button></div>
+      <div class="fs-body">
+        <div class="fs-browser">
+          <div id="fs-path" class="fs-path"></div>
+          <div id="fs-list" class="fs-list"></div>
+          <div id="fs-error" class="fs-error"></div>
+        </div>
+        <div class="fs-open-panel">
+          <div class="fs-open-title">Open views</div>
+          <div id="fs-open-list" class="fs-open-list"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
