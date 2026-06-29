@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.svg" alt="Splasher" width="560">
+  <img src="assets/logo.svg" alt="Splasher" width="360">
 </p>
 
 <p align="center">
@@ -12,6 +12,10 @@
 <p align="center">
   <b>▶ Try the live demo</b> — <a href="https://huggingface.co/spaces/SmaugC137/splasher">huggingface.co/spaces/SmaugC137/splasher</a>
   <br><sub>no install, runs in your browser</sub>
+</p>
+
+<p align="center">
+  <img src="assets/demo-splasher.png" alt="Splasher labeling a lidar BEV grid, with 3D cloud and camera panels" width="900">
 </p>
 
 ---
