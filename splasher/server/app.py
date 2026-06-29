@@ -15,8 +15,8 @@ from ..engine.session import Session
 from .files import combine_clouds, list_dir, open_file
 from .protocol import encode_array, grid_from_dict, session_info_to_dict, view_state_to_dict
 
-# Web front (vanilla, zero build) served as-is — `web/` directory at the repo root.
-WEB_DIR = Path(__file__).resolve().parents[2] / "web"
+# Web front (vanilla, zero build) served as-is — packaged at `splasher/web/`.
+WEB_DIR = Path(__file__).resolve().parents[1] / "web"
 
 
 def _as_session(session_or_source, labels) -> Session:

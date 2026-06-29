@@ -42,8 +42,8 @@ splasher/
              Returns a *semantic* ViewState (points + per-point labels + channel,
              BEV field, grid raster, selection, images) — not pixels.
   server/    FastAPI backend on the same Session + serves the web front; desktop app.
-web/         web front (vanilla, zero build) — the ONLY front.
-  vendor/    Three.js hosted locally (offline).
+  web/       web front (vanilla, zero build) — the ONLY front (packaged in the wheel).
+    vendor/  Three.js hosted locally (offline).
 ```
 
 **One front, one engine.** The web front is served by the backend; the desktop app
@@ -55,7 +55,7 @@ exposes `view_state()` + commands (`paint_rect`, `select_rect`, `apply_selection
 `set_frame`, `set_accum_radius`, `commit_grid`, `save`/`load`, …). Plugging in another front
 = consuming this `Session` (the web does it over HTTP). **Colorization stays on the front
 side**: each front draws the primitives its own way (reference helpers in
-`splasher.engine.render`, mirrored in JS under `web/src`).
+`splasher.engine.render`, mirrored in JS under `splasher/web/src`).
 
 ## Installation
 
@@ -84,7 +84,7 @@ Dark brutalist black-&-blue design. Labelable top-down (BEV) view (underlay mode
 height / density / intensity) + **3D/camera panels you can add, resize, and each bind to a
 channel** (3D color-by: height / intensity). Sensor placements (from `ChannelSpec.placement`)
 are drawn as markers in 3D. Classes are fully editable (⚙ in the *Classes* panel). Three.js
-is hosted locally (`web/vendor`) → works offline.
+is hosted locally (`splasher/web/vendor`) → works offline.
 
 > Native desktop window: the `app` extra ships a Qt WebEngine (Chromium) backend, so
 > `uv sync --extra app && splasher demo` opens a real native window out of the box. If no

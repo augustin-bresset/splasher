@@ -87,6 +87,9 @@ async function boot() {
   apply(first);
   fillGridForm(first.grid);
   updateDims(readGridForm());
+
+  await restoreWorkspace();                       // reopen views + restore layout from last session
+  window.addEventListener("beforeunload", saveWorkspace);
 }
 
 function apply(v) {
@@ -178,6 +181,44 @@ function updateSourceFromClouds() {
 function onFilesChanged() {
   if (fileMode) { buildClouds(); updateSourceFromClouds(); }
   renderOpenViews();
+  saveWorkspace();
+}
+
+// ------------------------------------------------------------- workspace persistence
+const WS_KEY = "splasher-workspace";
+function saveWorkspace() {
+  if (!manager) return;
+  try {
+    const grow = (sel) => parseFloat(getComputedStyle(document.querySelector(sel)).flexGrow) || 1;
+    localStorage.setItem(WS_KEY, JSON.stringify({
+      files: manager.openFiles().map((f) => f.path),
+      dir: fsPath,
+      layout: {
+        rail: document.querySelector(".rail").getBoundingClientRect().width,
+        bev: grow(".bev-panel"), views: grow(".views"),
+      },
+    }));
+  } catch { /* ignore */ }
+}
+async function restoreWorkspace() {
+  let ws;
+  try { ws = JSON.parse(localStorage.getItem(WS_KEY) || "null"); } catch { ws = null; }
+  if (!ws) return;
+  if (ws.dir) fsPath = ws.dir;
+  if (ws.layout) {
+    const L = ws.layout;
+    if (L.rail) document.querySelector(".rail").style.flex = `0 0 ${L.rail}px`;
+    if (L.bev) document.querySelector(".bev-panel").style.flexGrow = L.bev;
+    if (L.views) document.querySelector(".views").style.flexGrow = L.views;
+  }
+  if (fileMode && ws.files && ws.files.length) {
+    const cb = manager.onFiles; manager.onFiles = null;        // bulk: refresh once at the end
+    for (const path of ws.files) {
+      try { manager.addFile(await api.fsOpen(path)); } catch { /* file gone/changed */ }
+    }
+    manager.onFiles = cb;
+    onFilesChanged();
+  }
 }
 
 function buildAddBar() {
