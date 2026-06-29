@@ -1,4 +1,4 @@
-"""Tests headless de PointTarget (labels par point)."""
+"""Headless tests for PointTarget (per-point labels)."""
 
 import numpy as np
 

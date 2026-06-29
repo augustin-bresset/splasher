@@ -1,7 +1,7 @@
-"""Test headless de l'adaptateur apairo SANS apairo installé.
+"""Headless test for the apairo adapter WITHOUT apairo installed.
 
-On simule un dataset apairo synchrone via un objet duck-typé : l'adaptateur ne doit
-dépendre que de l'interface (is_synchronous / keys / __len__ / __getitem__).
+We simulate a synchronous apairo dataset with a duck-typed object: the adapter must only
+depend on the interface (is_synchronous / keys / __len__ / __getitem__).
 """
 
 from dataclasses import dataclass

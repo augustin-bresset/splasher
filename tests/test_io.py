@@ -1,4 +1,4 @@
-"""Test headless du round-trip de session (save -> load)."""
+"""Headless session roundtrip test (save -> load)."""
 
 import numpy as np
 
@@ -31,7 +31,7 @@ def test_session_roundtrip(tmp_path):
     np.testing.assert_array_equal(data["grid_labels"][3], gt.raster(3))
     np.testing.assert_array_equal(data["point_labels"][3], pt.labels(3))
 
-    # ré-injection dans des cibles neuves
+    # re-injection into fresh targets
     gt2 = GridTarget(grid)
     gt2.load_rasters(data["grid_labels"])
     assert (gt2.raster(3) == gt.raster(3)).all()

@@ -1,4 +1,4 @@
-"""Tests headless du cœur (numpy pur) — n'importent jamais l'UI/Qt."""
+"""Headless core tests (pure numpy) — never import the UI."""
 
 import numpy as np
 import pytest
@@ -29,7 +29,7 @@ def test_array_source_basic():
     assert len(src) == 3
     frame = src[0]
     assert set(frame.keys()) == {"lidar", "cam", "pose"}
-    assert frame.timestamp is None  # synchrone
+    assert frame.timestamp is None  # synchronous
     assert frame["lidar"].shape == (10, 4)
 
 
@@ -43,7 +43,7 @@ def test_channels_of_kind():
 def test_array_source_missing_channel_raises():
     specs = [ChannelSpec("lidar", ChannelKind.POINTCLOUD)]
     with pytest.raises(ValueError):
-        ArraySource(specs, [{"autre": np.zeros((1, 3))}])
+        ArraySource(specs, [{"other": np.zeros((1, 3))}])
 
 
 def test_colormap_rgba_range():

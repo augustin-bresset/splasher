@@ -1,16 +1,17 @@
-"""Tests headless : poses, cumul par registration, décumul des labels points."""
+"""Headless tests: poses, accumulation by registration, point-label de-accumulation."""
 
 import numpy as np
 
 from splasher import ArraySource, ChannelKind, ChannelSpec
 from splasher.core.accumulate import accumulate, window_indices
 from splasher.core.poses import invert, pose_to_matrix, transform_points
+from splasher.core.source import Frame
 from splasher.core.target import PointTarget
 
 
 def test_pose_to_matrix_forms():
     assert pose_to_matrix(np.eye(4)).shape == (4, 4)
-    T = pose_to_matrix(np.array([1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 1.0]))  # quat identité
+    T = pose_to_matrix(np.array([1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 1.0]))  # identity quaternion
     assert np.allclose(T[:3, 3], [1, 2, 3])
     assert np.allclose(T[:3, :3], np.eye(3))
 
@@ -36,11 +37,11 @@ def _moving_source(n=5):
     ]
     frames = []
     for t in range(n):
-        # un point fixe dans le MONDE à x=10 ; l'ego avance de 1 par frame en x
+        # a point fixed in the WORLD at x=10; the ego moves forward by 1 per frame in x
         pose = np.eye(4, dtype=np.float32)
         pose[0, 3] = float(t)
         world_x = 10.0
-        pt_ego = np.array([[world_x - t, 0.0, 0.0]], dtype=np.float32)  # vu depuis l'ego
+        pt_ego = np.array([[world_x - t, 0.0, 0.0]], dtype=np.float32)  # seen from the ego
         frames.append({"lidar": pt_ego, "pose": pose})
     return ArraySource(specs, frames)
 
@@ -49,8 +50,8 @@ def test_accumulate_registers_to_reference():
     src = _moving_source(5)
     ref = 2
     acc = accumulate(src, ref, window_indices(ref, 2, 5), ["lidar"], "pose")
-    # tous les points (un point monde fixe) doivent retomber au même endroit
-    # dans le repère du frame ref : x = 10 - ref = 8
+    # all points (a single fixed world point) must land at the same place
+    # in the ref frame's frame of reference: x = 10 - ref = 8
     assert len(acc.points) == 5
     assert np.allclose(acc.points[:, 0], 8.0, atol=1e-5)
     assert set(acc.frame_id.tolist()) == {0, 1, 2, 3, 4}
@@ -64,7 +65,7 @@ def test_accumulate_two_channels_chan_and_point_ids():
     ]
     frame = {
         "a": np.zeros((3, 3), np.float32),  # 3 points -> chan 0, point_id 0..2
-        "b": np.ones((2, 3), np.float32),   # 2 points -> chan 1, point_id 3..4 (concat complète)
+        "b": np.ones((2, 3), np.float32),   # 2 points -> chan 1, point_id 3..4 (full concat)
         "pose": np.eye(4, dtype=np.float32),
     }
     src = ArraySource(specs, [frame])
@@ -72,13 +73,29 @@ def test_accumulate_two_channels_chan_and_point_ids():
     assert acc.counts[0] == 5
     assert acc.chan_id.tolist() == [0, 0, 0, 1, 1]
     assert acc.point_id.tolist() == [0, 1, 2, 3, 4]
-    # filtre de visibilité : ne garder que le canal b (indice 1)
+    # visibility filter: keep only channel b (index 1)
     vis = acc.visible_mask([1])
     assert vis.tolist() == [False, False, False, True, True]
 
 
+def test_accumulate_skips_frames_missing_pose():
+    # A real (apairo) source can yield frames lacking the pose channel after sync;
+    # accumulate must skip those for registration instead of crashing.
+    class _Src:
+        def __len__(self): return 3
+        def channels(self): return []
+        def __getitem__(self, i):
+            ch = {"lidar": np.full((2, 3), float(i), np.float32)}
+            if i != 1:                       # frame 1 has no pose
+                ch["pose"] = np.eye(4, dtype=np.float32)
+            return Frame(channels=ch)
+
+    acc = accumulate(_Src(), ref_idx=0, indices=[0, 1, 2], cloud_keys=["lidar"], pose_key="pose")
+    assert set(acc.frame_id.tolist()) == {0, 2}   # frame 1 skipped, no KeyError
+
+
 def test_decumul_via_apply_scatter():
-    # le pinceau touche un point provenant de 3 frames -> labels répartis par frame
+    # the brush hits a point coming from 3 frames -> labels spread per frame
     src = _moving_source(5)
     ref = 2
     acc = accumulate(src, ref, window_indices(ref, 2, 5), ["lidar"], "pose")
@@ -86,9 +103,9 @@ def test_decumul_via_apply_scatter():
     frame_to_sel = {int(f): (acc.point_id[acc.frame_id == f], acc.counts[int(f)])
                     for f in np.unique(acc.frame_id)}
     assert pt.apply_scatter(ref, frame_to_sel, class_id=4)
-    # chaque frame a reçu son label sur son point 0
+    # each frame received its label on its point 0
     for f in range(5):
         assert pt.labels(f).tolist() == [4]
-    pt.undo(ref)  # undo atomique sous le frame de référence : tout revient
+    pt.undo(ref)  # atomic undo under the reference frame: everything reverts
     for f in range(5):
         assert pt.labels(f).tolist() == [0]

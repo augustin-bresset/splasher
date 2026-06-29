@@ -1,4 +1,4 @@
-"""Tests headless de la grille (numpy pur)."""
+"""Headless grid tests (pure numpy)."""
 
 import numpy as np
 import pytest
@@ -54,5 +54,5 @@ def test_grid_from_points():
 def test_line_segments_shape():
     g = Grid(0.0, 4.0, 0.0, 2.0, 1.0)
     xs, ys = g.line_segments()
-    # (cols+1) verticales + (rows+1) horizontales, 2 points chacune
+    # (cols+1) vertical + (rows+1) horizontal, 2 points each
     assert len(xs) == len(ys) == 2 * ((g.cols + 1) + (g.rows + 1))
