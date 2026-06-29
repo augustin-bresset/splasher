@@ -1,22 +1,30 @@
 [project]
 name = "splasher"
 version = "0.1.0"
-description = "Labélisation : canaux synchronisés (nuages 3D, images) -> grille 2D BEV ou labels par point"
+description = "Labeling tool: synchronized channels (3D clouds, images) -> 2D BEV grid or per-point labels"
 readme = "README.md"
 authors = [{ name = "Augustin Bresset", email = "augustin.bresset@gmail.com" }]
 requires-python = ">=3.11"
-# Le cœur + le moteur ne dépendent que de numpy. Les fronts sont des extras.
+keywords = ["labeling", "annotation", "lidar", "point-cloud", "bev", "robotics", "traversability"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+# Core + engine depend only on numpy. The fronts are extras.
 dependencies = [
     "numpy",
 ]
 
-# apairo n'est qu'UN adaptateur d'entrée optionnel — le cœur n'en dépend pas.
+# apairo is just ONE optional input adapter — the core does not depend on it.
 [project.optional-dependencies]
 apairo = [
     "apairo @ git+https://github.com/apairo-robotics/apairo.git",
     "PyYAML",
 ]
-# Serveur web + API (le moteur `splasher.engine` n'en dépend pas).
+# Web server + API (the `splasher.engine` core does not depend on it).
 api = [
     "fastapi",
     "uvicorn",
@@ -34,7 +42,7 @@ app = [
 splasher = "splasher.cli:main"
 
 [dependency-groups]
-dev = ["pytest", "httpx"]  # httpx : requis par fastapi.testclient (tests API)
+dev = ["pytest", "httpx"]  # httpx: required by fastapi.testclient (API tests)
 
 [build-system]
 requires = ["hatchling"]

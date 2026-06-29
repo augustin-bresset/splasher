@@ -126,3 +126,23 @@ so a front renders in a single round-trip):
 
 numpy arrays travel as `{dtype, shape, data(base64)}` (`splasher.server.protocol`), decodable
 directly into a `TypedArray` on the JavaScript side. Interactive docs at `/docs`.
+
+## File-viewer mode
+
+Launched empty (`splasher`), *Open file…* browses the filesystem (type a path, **Tab** to
+complete) and opens point clouds (`.npy`/`.bin`/`.pcd`) and images (`.png`/`.jpg`/… or
+`.npy` `HxWxC`) into resizable views. The **Clouds (BEV)** panel selects which open clouds
+feed the BEV (multiple = combined), with a color mode (height/intensity/normal). The BEV
+grid and its labels are **independent** of the displayed cloud — switching/combining clouds
+never wipes them. **Export** writes the grid raster to a single `.npy` (default name
+`<cloud>_bev.npy`); **Save** writes a full session folder.
+
+## Development
+
+```bash
+uv sync --extra api          # core + engine + server (for the test suite)
+uv run --extra api pytest -q # run the tests
+```
+
+The core/engine import without any UI dependency; tests are pure-numpy + FastAPI's
+`TestClient`. CI runs the suite on Python 3.11 and 3.12 (`.github/workflows/ci.yml`).
