@@ -1,20 +1,22 @@
-"""Sauvegarde/chargement d'une session de labels — fichiers autonomes.
+"""Save/load a label session — self-contained files.
 
-Format sur disque (dossier de sortie) :
+On-disk format (output directory):
 
-    session.json          # grille (étendue, cell_size) + jeu de classes
-    grid/frame_00007.npy  # raster d'ids (rows, cols), un par sample labélisé
-    grid/frame_00007.png  # même raster colorisé (aperçu, y vers le haut)
-    grid/global.npy       # raster global (si labélisé)
-    points/frame_00007.npy# labels (N,) int64 par frame (segmentation)
+    session.json          # grid (extent, cell_size) + class set
+    grid/frame_00007.npy  # id raster (rows, cols), one per labeled sample
+    grid/frame_00007.png  # same raster colorized (preview, y upwards)
+    grid/global.npy       # global raster (if labeled)
+    points/frame_00007.npy# labels (N,) int64 per frame (segmentation)
 
-Les `.npy`/`.json` n'utilisent que numpy + stdlib. Le `.png` (aperçu) passe par Qt
-si disponible, sinon il est simplement omis.
+Everything uses numpy + stdlib only (the `.png` preview is encoded via `zlib`, with no
+UI dependency).
 """
 
 from __future__ import annotations
 
 import json
+import struct
+import zlib
 from pathlib import Path
 
 import numpy as np
@@ -24,14 +26,29 @@ from .labels import LabelSet
 
 
 def _save_png(path: Path, rgba: np.ndarray) -> bool:
-    try:
-        from PySide6.QtGui import QImage
-    except Exception:
-        return False
-    arr = np.ascontiguousarray(np.flipud(rgba).astype(np.uint8))  # y vers le haut à l'écran
+    """Encode an RGBA `(h, w, 3|4)` uint8 array as PNG (minimal stdlib encoder)."""
+    arr = np.ascontiguousarray(np.flipud(np.asarray(rgba)).astype(np.uint8))  # y upwards
     h, w = arr.shape[:2]
-    img = QImage(arr.data, w, h, 4 * w, QImage.Format_RGBA8888)
-    return bool(img.copy().save(str(path)))
+    if arr.ndim == 2:
+        arr = np.repeat(arr[:, :, None], 3, axis=2)
+    if arr.shape[2] == 3:
+        arr = np.concatenate([arr, np.full((h, w, 1), 255, np.uint8)], axis=2)
+
+    # Raw data: one filter byte (0) at the start of each row.
+    raw = np.zeros((h, 1 + w * 4), np.uint8)
+    raw[:, 1:] = arr.reshape(h, w * 4)
+
+    def _chunk(typ: bytes, data: bytes) -> bytes:
+        return (struct.pack(">I", len(data)) + typ + data
+                + struct.pack(">I", zlib.crc32(typ + data) & 0xFFFFFFFF))
+
+    ihdr = struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)  # 8 bits, type 6 = RGBA
+    png = (b"\x89PNG\r\n\x1a\n"
+           + _chunk(b"IHDR", ihdr)
+           + _chunk(b"IDAT", zlib.compress(raw.tobytes(), 9))
+           + _chunk(b"IEND", b""))
+    Path(path).write_bytes(png)
+    return True
 
 
 def save_session(out_dir, *, grid: Grid, labelset: LabelSet,
@@ -74,7 +91,7 @@ def _frame_idx(path: Path) -> int:
 
 
 def load_session(out_dir) -> dict:
-    """Renvoie `{grid, labelset, grid_labels: {i: raster}, point_labels: {i: (N,)}}`."""
+    """Return `{grid, labelset, grid_labels: {i: raster}, point_labels: {i: (N,)}}`."""
     out = Path(out_dir)
     meta = json.loads((out / "session.json").read_text())
     g = meta["grid"]

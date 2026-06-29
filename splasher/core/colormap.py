@@ -1,10 +1,10 @@
-"""Petit colormap viridis numpy-pur (pas de matplotlib) : valeurs -> RGBA float [0,1]."""
+"""Small pure-numpy viridis colormap (no matplotlib): values -> RGBA float [0,1]."""
 
 from __future__ import annotations
 
 import numpy as np
 
-# Ancres viridis approximées (0 -> 1).
+# Approximate viridis anchors (0 -> 1).
 _VIRIDIS = (
     np.array(
         [
@@ -22,9 +22,9 @@ _VIRIDIS = (
 
 def colormap(values, *, vmin: float | None = None, vmax: float | None = None,
              alpha: float = 1.0, lut: np.ndarray = _VIRIDIS) -> np.ndarray:
-    """Mappe `values` (1D) vers un tableau RGBA `(N, 4)` float32 dans [0, 1].
+    """Map `values` (1D) to an RGBA array `(N, 4)` float32 in [0, 1].
 
-    `vmin`/`vmax` par défaut = min/max finis des valeurs.
+    `vmin`/`vmax` default to the finite min/max of the values.
     """
     v = np.asarray(values, dtype=np.float32).ravel()
     finite = np.isfinite(v)

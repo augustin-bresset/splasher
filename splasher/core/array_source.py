@@ -1,7 +1,7 @@
-"""`ArraySource` — une `Source` construite depuis des tableaux numpy en mémoire.
+"""`ArraySource` — a `Source` built from in-memory numpy arrays.
 
-C'est l'entrée par défaut, sans aucune dépendance : utile pour les démos, les
-tests, et tout pipeline qui produit déjà des arrays. Aucune I/O cachée.
+This is the default input, with no dependency: handy for demos, tests, and any pipeline
+that already produces arrays. No hidden I/O.
 """
 
 from __future__ import annotations
@@ -14,16 +14,16 @@ from .source import ChannelSpec, Frame, Source
 
 
 class ArraySource(Source):
-    """Source synchrone en mémoire.
+    """In-memory synchronous source.
 
     Parameters
     ----------
     specs:
-        Description des canaux (`ChannelSpec`). L'ordre est conservé.
+        Channel description (`ChannelSpec`). Order is preserved.
     frames:
-        Une séquence de dicts `{nom_canal: np.ndarray}`, un par pas de temps.
+        A sequence of dicts `{channel_name: np.ndarray}`, one per time step.
     timestamps:
-        Optionnel ; horodatages par frame. `None` (défaut) = synchrone.
+        Optional; per-frame timestamps. `None` (default) = synchronous.
     """
 
     def __init__(
@@ -35,14 +35,14 @@ class ArraySource(Source):
         self._specs = list(specs)
         self._frames = [dict(f) for f in frames]
         if timestamps is not None and len(timestamps) != len(self._frames):
-            raise ValueError("timestamps doit avoir la même longueur que frames")
+            raise ValueError("timestamps must have the same length as frames")
         self._timestamps = None if timestamps is None else [float(t) for t in timestamps]
 
         names = {s.name for s in self._specs}
         for i, fr in enumerate(self._frames):
             missing = names - set(fr.keys())
             if missing:
-                raise ValueError(f"frame {i}: canaux manquants {sorted(missing)}")
+                raise ValueError(f"frame {i}: missing channels {sorted(missing)}")
 
     def __len__(self) -> int:
         return len(self._frames)

@@ -1,16 +1,16 @@
-"""Cumul de frames par registration des poses, avec traçabilité pour le décumul.
+"""Frame accumulation by pose registration, with traceability for de-accumulation.
 
-On accumule une fenêtre de frames **dans le repère du frame de référence** (le frame
-courant) : chaque frame `j` est ramené par `inv(pose_ref) @ pose_j`. Chaque point
-accumulé garde :
-- `frame_id` : frame source,
-- `chan_id`  : indice du canal nuage source (dans `cloud_keys`),
-- `point_id` : indice du point dans **la concaténation complète** des canaux nuage de
-  ce frame (ordre = `cloud_keys`), fixe quelle que soit la visibilité des canaux.
+We accumulate a window of frames **into the reference frame's frame of reference** (the
+current frame): each frame `j` is brought back by `inv(pose_ref) @ pose_j`. Each
+accumulated point keeps:
+- `frame_id`: source frame,
+- `chan_id` : index of the source cloud channel (within `cloud_keys`),
+- `point_id`: index of the point within the **full concatenation** of that frame's cloud
+  channels (order = `cloud_keys`), fixed regardless of channel visibility.
 
-Cela permet de **décumuler** des labels peints sur le nuage cumulé vers chaque frame
-d'origine, et de **filtrer par canal** sans jamais désaligner les labels points
-(qui restent dimensionnés sur la concaténation complète).
+This makes it possible to **de-accumulate** labels painted on the accumulated cloud back
+to each source frame, and to **filter by channel** without ever misaligning the point
+labels (which stay sized on the full concatenation).
 """
 
 from __future__ import annotations
@@ -24,25 +24,25 @@ from .poses import invert, pose_to_matrix, transform_points
 
 @dataclass
 class Accumulation:
-    points: np.ndarray          # (M, 3+) dans le repère de référence
-    frame_id: np.ndarray        # (M,) frame source
-    chan_id: np.ndarray         # (M,) indice de canal nuage source
-    point_id: np.ndarray        # (M,) indice dans la concaténation complète du frame
-    counts: dict[int, int] = field(default_factory=dict)  # frame -> nb total de points
+    points: np.ndarray          # (M, 3+) in the reference frame
+    frame_id: np.ndarray        # (M,) source frame
+    chan_id: np.ndarray         # (M,) source cloud channel index
+    point_id: np.ndarray        # (M,) index within the frame's full concatenation
+    counts: dict[int, int] = field(default_factory=dict)  # frame -> total number of points
 
     @property
     def xy(self) -> np.ndarray:
         return self.points[:, :2]
 
     def visible_mask(self, visible_chan_indices) -> np.ndarray:
-        """Masque des points dont le canal est dans `visible_chan_indices`."""
+        """Mask of the points whose channel is in `visible_chan_indices`."""
         if len(self.chan_id) == 0:
             return np.zeros(0, dtype=bool)
         return np.isin(self.chan_id, np.asarray(list(visible_chan_indices), dtype=np.int64))
 
 
 def window_indices(ref_idx: int, radius: int, n_frames: int) -> list[int]:
-    """Fenêtre `[ref-radius, ref+radius]` bornée à `[0, n_frames)`."""
+    """Window `[ref-radius, ref+radius]` clamped to `[0, n_frames)`."""
     lo = max(0, ref_idx - radius)
     hi = min(n_frames, ref_idx + radius + 1)
     return list(range(lo, hi))
@@ -50,19 +50,26 @@ def window_indices(ref_idx: int, radius: int, n_frames: int) -> list[int]:
 
 def accumulate(source, ref_idx: int, indices: list[int], cloud_keys: list[str],
                pose_key: str | None = None) -> Accumulation:
-    """Accumule `indices` dans le repère de `ref_idx`. `pose_key=None` -> identité."""
+    """Accumulate `indices` into the frame of `ref_idx`. `pose_key=None` -> identity."""
     p_ref_inv = None
     if pose_key is not None:
-        p_ref_inv = invert(pose_to_matrix(source[ref_idx].channels[pose_key]))
+        ref_pose = source[ref_idx].channels.get(pose_key)
+        if ref_pose is not None:
+            p_ref_inv = invert(pose_to_matrix(ref_pose))
 
     pts, fids, cids, pids = [], [], [], []
     counts: dict[int, int] = {}
     for j in indices:
+        # Pose-based accumulation but no reference pose → can't register neighbors; keep ref only.
+        if pose_key is not None and p_ref_inv is None and j != ref_idx:
+            continue
         frame = source[j]
-        if pose_key is not None and j != ref_idx:
-            T = p_ref_inv @ pose_to_matrix(frame.channels[pose_key])
-        else:
-            T = None  # identité (frame de référence, ou pas de pose)
+        T = None  # identity (reference frame, or no pose)
+        if p_ref_inv is not None and j != ref_idx:
+            pj = frame.channels.get(pose_key)
+            if pj is None:
+                continue  # this frame lacks its pose → can't register it, skip its points
+            T = p_ref_inv @ pose_to_matrix(pj)
 
         offset = 0
         for ci, key in enumerate(cloud_keys):

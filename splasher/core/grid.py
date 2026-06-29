@@ -1,15 +1,14 @@
-"""`Grid` — la grille de carrés vue-de-dessus (BEV), définie en unités monde.
+"""`Grid` — the top-down (BEV) grid of cells, defined in world units.
 
-C'est la première chose qu'on conçoit : une étendue monde `(xmin..xmax, ymin..ymax)`
-et la taille d'un carré `cell_size` (mètres). On en déduit `cols × rows`. La grille
-fournit le mapping monde <-> cellule, un raster vide, et les segments de lignes pour
-l'affichage.
+It is the first thing you design: a world extent `(xmin..xmax, ymin..ymax)` and the cell
+size `cell_size` (meters). From it we derive `cols × rows`. The grid provides the
+world <-> cell mapping, an empty raster, and the line segments for display.
 
-Conventions :
-- `j` (colonne) indexe `x` : `j = floor((x - xmin) / cell_size)`
-- `i` (ligne)   indexe `y` : `i = floor((y - ymin) / cell_size)`
-- un raster a la forme `(rows, cols)`, indexé `raster[i, j]`
-- l'origine `(xmin, ymin)` est en bas-gauche, `y` vers le haut.
+Conventions:
+- `j` (column) indexes `x`: `j = floor((x - xmin) / cell_size)`
+- `i` (row)    indexes `y`: `i = floor((y - ymin) / cell_size)`
+- a raster has shape `(rows, cols)`, indexed `raster[i, j]`
+- the origin `(xmin, ymin)` is bottom-left, `y` upwards.
 """
 
 from __future__ import annotations
@@ -30,9 +29,9 @@ class Grid:
 
     def __post_init__(self) -> None:
         if self.cell_size <= 0:
-            raise ValueError("cell_size doit être > 0")
+            raise ValueError("cell_size must be > 0")
         if self.xmax <= self.xmin or self.ymax <= self.ymin:
-            raise ValueError("étendue invalide (xmax > xmin et ymax > ymin requis)")
+            raise ValueError("invalid extent (xmax > xmin and ymax > ymin required)")
 
     # --- dimensions -------------------------------------------------------
     @property
@@ -49,7 +48,7 @@ class Grid:
 
     @property
     def width(self) -> float:
-        """Largeur réelle couverte par les carrés (cols * cell_size)."""
+        """Actual width covered by the cells (cols * cell_size)."""
         return self.cols * self.cell_size
 
     @property
@@ -60,9 +59,9 @@ class Grid:
     def extent(self) -> tuple[float, float, float, float]:
         return (self.xmin, self.xmax, self.ymin, self.ymax)
 
-    # --- mapping monde <-> cellule ---------------------------------------
+    # --- world <-> cell mapping ------------------------------------------
     def world_to_cell(self, xy: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """`xy` (N, 2) -> (`ij` (N, 2) int [ligne, colonne], `valid` (N,) bool)."""
+        """`xy` (N, 2) -> (`ij` (N, 2) int [row, column], `valid` (N,) bool)."""
         xy = np.asarray(xy, dtype=np.float64).reshape(-1, 2)
         j = np.floor((xy[:, 0] - self.xmin) / self.cell_size).astype(np.intp)
         i = np.floor((xy[:, 1] - self.ymin) / self.cell_size).astype(np.intp)
@@ -70,7 +69,7 @@ class Grid:
         return np.stack([i, j], axis=1), valid
 
     def cell_to_world(self, i: int, j: int) -> tuple[float, float]:
-        """Centre monde de la cellule `(i, j)`."""
+        """World center of cell `(i, j)`."""
         x = self.xmin + (j + 0.5) * self.cell_size
         y = self.ymin + (i + 0.5) * self.cell_size
         return (x, y)
@@ -78,13 +77,13 @@ class Grid:
     def empty_raster(self, fill: int = 0, dtype=np.int32) -> np.ndarray:
         return np.full((self.rows, self.cols), fill, dtype=dtype)
 
-    # --- affichage --------------------------------------------------------
+    # --- display ----------------------------------------------------------
     def image_rect(self) -> tuple[float, float, float, float]:
-        """`(x, y, w, h)` pour positionner un `ImageItem (rows, cols)` en coords monde."""
+        """`(x, y, w, h)` to place an `ImageItem (rows, cols)` in world coordinates."""
         return (self.xmin, self.ymin, self.width, self.height)
 
     def line_segments(self) -> tuple[np.ndarray, np.ndarray]:
-        """Segments des lignes de la grille pour un tracé `connect='pairs'`."""
+        """Grid line segments for a `connect='pairs'` plot."""
         x0, y0 = self.xmin, self.ymin
         x1, y1 = self.xmin + self.width, self.ymin + self.height
         vx = self.xmin + self.cell_size * np.arange(self.cols + 1)
@@ -102,7 +101,7 @@ class Grid:
 
 def grid_from_points(xy: np.ndarray, cell_size: float = 1.0,
                      margin: float = 2.0) -> Grid:
-    """Grille par défaut englobant un nuage de points top-down `xy` (N, 2)."""
+    """Default grid enclosing a top-down point cloud `xy` (N, 2)."""
     xy = np.asarray(xy, dtype=np.float64).reshape(-1, 2)
     if len(xy) == 0:
         return Grid(-10.0, 10.0, -10.0, 10.0, cell_size)

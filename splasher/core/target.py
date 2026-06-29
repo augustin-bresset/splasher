@@ -1,12 +1,11 @@
-"""Cibles de labélisation : ce que produit la sélection d'un rectangle.
+"""Label targets: what a rectangle selection produces.
 
-- `GridTarget`  : raster d'ids par sample — sortie « grille telle quelle ».
-- `PointTarget` : labels `(N,)` par frame (segmentation du nuage).
+- `GridTarget`  : id raster per sample — "grid as-is" output.
+- `PointTarget` : `(N,)` labels per frame (cloud segmentation).
 
-**Historique par frame** : chaque frame possède sa propre pile d'annulation. `undo`
-prend le frame courant et n'annule que sa dernière action. Un coup de pinceau cumulé
-(décumulé sur plusieurs frames) est enregistré, de façon atomique, sous le frame de
-référence où il a été peint.
+**Per-frame history**: each frame has its own undo stack. `undo` takes the current frame
+and only undoes its last action. An accumulated brush stroke (de-accumulated over several
+frames) is recorded, atomically, under the reference frame where it was painted.
 """
 
 from __future__ import annotations
@@ -26,7 +25,7 @@ class LabelTarget(Protocol):
 
 
 class GridTarget:
-    """Rasters d'ids par sample (+ un raster global). Cible « grille »."""
+    """Id rasters per sample (+ a global raster). "grid" target."""
 
     name = "grid"
 
@@ -69,7 +68,7 @@ class GridTarget:
 
     def apply_mask(self, frame_idx: int, mask: np.ndarray, class_id: int,
                    scope: str = "sample") -> bool:
-        """Peint un masque booléen de cellules `(rows, cols)` (sélection)."""
+        """Paint a boolean cell mask `(rows, cols)` (selection)."""
         if mask is None or not mask.any():
             return False
         return self._set(frame_idx, mask, class_id, scope)
@@ -95,10 +94,10 @@ class GridTarget:
 
 
 class PointTarget:
-    """Labels `(N,) int64` par frame. Cible « points » (segmentation du nuage).
+    """`(N,) int64` labels per frame. "points" target (cloud segmentation).
 
-    Les labels sont dimensionnés sur la **concaténation complète** des canaux nuage du
-    frame (ordre fixe), donc indépendants de la visibilité des canaux.
+    Labels are sized on the **full concatenation** of the frame's cloud channels (fixed
+    order), hence independent of channel visibility.
     """
 
     name = "points"
@@ -136,10 +135,10 @@ class PointTarget:
 
     def apply_scatter(self, ref_frame: int, frame_to_sel: dict[int, tuple[np.ndarray, int]],
                       class_id: int) -> bool:
-        """Assigne `class_id` à des points répartis sur plusieurs frames (décumul).
+        """Assign `class_id` to points spread over several frames (de-accumulation).
 
-        `frame_to_sel` : `{frame_idx: (indices, n_points_du_frame)}`. L'opération est
-        enregistrée de façon atomique sous `ref_frame` (le frame courant).
+        `frame_to_sel`: `{frame_idx: (indices, n_points_of_the_frame)}`. The operation is
+        recorded atomically under `ref_frame` (the current frame).
         """
         changes: list[tuple] = []
         for frame_idx, (indices, n) in frame_to_sel.items():

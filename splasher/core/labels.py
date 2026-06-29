@@ -1,7 +1,7 @@
-"""`LabelSet` — l'ensemble des classes de labélisation (id, nom, couleur).
+"""`LabelSet` — the set of labeling classes (id, name, color).
 
-Générique : aucune classe n'est imposée. Un défaut « traversabilité » est fourni,
-mais on peut charger/sauver n'importe quel jeu de classes en JSON.
+Generic: no class is imposed. A "traversability" default is provided, but any class set
+can be loaded/saved as JSON.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ class LabelSet:
 
     @property
     def paintable(self) -> list[LabelClass]:
-        """Classes assignables (toutes sauf `ignore`)."""
+        """Assignable classes (all but `ignore`)."""
         return [c for c in self.classes if c.id != self.ignore_id]
 
     def color_of(self, class_id: int) -> RGB:
@@ -46,7 +46,7 @@ class LabelSet:
         return c.name if c else str(class_id)
 
     def lut(self, alpha: int = 255, max_id: int | None = None) -> np.ndarray:
-        """LUT RGBA `(K, 4)` uint8 indexée par id. `ignore_id` -> alpha 0."""
+        """RGBA LUT `(K, 4)` uint8 indexed by id. `ignore_id` -> alpha 0."""
         top = self.max_id if max_id is None else max(max_id, self.max_id)
         lut = np.zeros((top + 1, 4), dtype=np.uint8)
         for c in self.classes:
@@ -57,11 +57,11 @@ class LabelSet:
         return lut
 
     def colorize(self, raster: np.ndarray, alpha: int = 255) -> np.ndarray:
-        """Raster d'ids `(rows, cols)` -> image RGBA `(rows, cols, 4)` uint8."""
+        """Id raster `(rows, cols)` -> RGBA image `(rows, cols, 4)` uint8."""
         max_id = int(raster.max()) if raster.size else 0
         return self.lut(alpha=alpha, max_id=max_id)[raster]
 
-    # --- (dé)sérialisation ------------------------------------------------
+    # --- (de)serialization ------------------------------------------------
     def to_dict(self) -> dict:
         return {
             "ignore_id": self.ignore_id,
@@ -84,13 +84,12 @@ class LabelSet:
 
     @classmethod
     def default(cls) -> "LabelSet":
-        """Jeu par défaut orienté traversabilité (modifiable / remplaçable)."""
+        """Minimal default set (fully editable). 0 = unlabeled, then a couple of classes."""
         return cls(
             [
-                LabelClass(0, "non labélisé", (0, 0, 0)),
+                LabelClass(0, "unlabeled", (0, 0, 0)),
                 LabelClass(1, "traversable", (60, 200, 70)),
                 LabelClass(2, "obstacle", (220, 50, 45)),
-                LabelClass(3, "incertain", (235, 170, 30)),
             ],
             ignore_id=0,
         )

@@ -1,10 +1,10 @@
-"""Source synthétique multi-canaux pour démos/tests — aucune donnée externe.
+"""Synthetic multi-channel source for demos/tests — no external data.
 
-Scène « conduite » : l'ego avance en +x. Canaux fournis :
-- `lidar`        : sol bruité + obstacles (nuage dense),
-- `lidar_haut`   : points en hauteur au-dessus des obstacles (nuage épars, distinct),
-- `camera_avant` / `camera_arriere` : deux images factices,
-- `pose`         : matrice 4x4 par frame (pour le cumul).
+"Driving" scene: the ego moves forward in +x. Channels provided:
+- `lidar`        : noisy ground + obstacles (dense cloud),
+- `lidar_top`   : points above the obstacles (sparse, distinct cloud),
+- `camera_front` / `camera_rear` : two fake images,
+- `pose`         : 4x4 matrix per frame (for accumulation).
 """
 
 from __future__ import annotations
@@ -18,14 +18,14 @@ from .core.source import ChannelKind, ChannelSpec
 def _make_image(h: int, w: int, t: int, n_frames: int, *, rear: bool = False) -> np.ndarray:
     img = np.empty((h, w, 3), dtype=np.uint8)
     horizon = h // 2
-    img[:horizon] = (140, 110, 90) if rear else (90, 120, 200)  # ciel (teinte différente derrière)
+    img[:horizon] = (140, 110, 90) if rear else (90, 120, 200)  # sky (different hue at the rear)
     img[horizon:] = (70, 110, 70)
     for r in range(horizon, h):
         frac = (r - horizon) / max(1, h - horizon)
         half = int((0.05 + 0.45 * frac) * w)
         c = w // 2
         img[r, max(0, c - half):min(w, c + half)] = (60, 60, 64)
-    # « obstacle » mobile (sens inverse derrière)
+    # moving "obstacle" (opposite direction at the rear)
     prog = t / max(1, n_frames - 1)
     bx = int((1 - prog if rear else prog) * (w - 50))
     img[horizon - 30:horizon + 10, bx:bx + 40] = (80, 150, 210) if rear else (210, 80, 60)
@@ -43,11 +43,17 @@ def make_demo_source(n_frames: int = 40, seed: int = 0) -> ArraySource:
     obs_r = rng.uniform(0.6, 1.8, n_obs)
     obs_h = rng.uniform(1.0, 3.0, n_obs)
 
+    # Sensor placements in the ego frame (position; orientation defaults to forward, +x).
+    # camera_rear faces backward: 180° about z, quaternion [x,y,z, qx,qy,qz,qw].
     specs = [
-        ChannelSpec("lidar", ChannelKind.POINTCLOUD, np.dtype("float32"), (None, 4)),
-        ChannelSpec("lidar_haut", ChannelKind.POINTCLOUD, np.dtype("float32"), (None, 4)),
-        ChannelSpec("camera_avant", ChannelKind.IMAGE, np.dtype("uint8"), (h, w, 3)),
-        ChannelSpec("camera_arriere", ChannelKind.IMAGE, np.dtype("uint8"), (h, w, 3)),
+        ChannelSpec("lidar", ChannelKind.POINTCLOUD, np.dtype("float32"), (None, 4),
+                    placement=np.array([0.0, 0.0, 1.8], np.float32)),
+        ChannelSpec("lidar_top", ChannelKind.POINTCLOUD, np.dtype("float32"), (None, 4),
+                    placement=np.array([0.0, 0.0, 2.4], np.float32)),
+        ChannelSpec("camera_front", ChannelKind.IMAGE, np.dtype("uint8"), (h, w, 3),
+                    placement=np.array([1.6, 0.0, 1.5], np.float32)),
+        ChannelSpec("camera_rear", ChannelKind.IMAGE, np.dtype("uint8"), (h, w, 3),
+                    placement=np.array([-1.6, 0.0, 1.5, 0.0, 0.0, 1.0, 0.0], np.float32)),
         ChannelSpec("pose", ChannelKind.POSE, np.dtype("float32"), (4, 4)),
     ]
 
@@ -70,7 +76,7 @@ def make_demo_source(n_frames: int = 40, seed: int = 0) -> ArraySource:
                 py = obs_y[k] + rng.normal(0.0, obs_r[k], m)
                 pz = rng.uniform(0.0, obs_h[k], m)
                 ground.append(np.stack([px, py, pz, rng.uniform(0.6, 1.0, m)], axis=1))
-                # nuage "haut" : points épars au-dessus de l'obstacle
+                # "high" cloud: sparse points above the obstacle
                 mh = 80
                 hx = xr + rng.normal(0.0, obs_r[k] * 0.5, mh)
                 hy = obs_y[k] + rng.normal(0.0, obs_r[k] * 0.5, mh)
@@ -78,7 +84,7 @@ def make_demo_source(n_frames: int = 40, seed: int = 0) -> ArraySource:
                 high.append(np.stack([hx, hy, hz, rng.uniform(0.2, 0.5, mh)], axis=1))
 
         lidar = np.concatenate(ground, axis=0).astype(np.float32)
-        lidar_haut = (np.concatenate(high, axis=0) if high
+        lidar_top = (np.concatenate(high, axis=0) if high
                       else np.zeros((0, 4))).astype(np.float32)
 
         pose = np.eye(4, dtype=np.float32)
@@ -86,9 +92,9 @@ def make_demo_source(n_frames: int = 40, seed: int = 0) -> ArraySource:
 
         frames.append({
             "lidar": lidar,
-            "lidar_haut": lidar_haut,
-            "camera_avant": _make_image(h, w, t, n_frames),
-            "camera_arriere": _make_image(h, w, t, n_frames, rear=True),
+            "lidar_top": lidar_top,
+            "camera_front": _make_image(h, w, t, n_frames),
+            "camera_rear": _make_image(h, w, t, n_frames, rear=True),
             "pose": pose,
         })
 

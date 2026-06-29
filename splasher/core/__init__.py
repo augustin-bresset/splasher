@@ -1,1 +1,1 @@
-"""Cœur de Splasher : protocole d'entrée, grille, projection, cibles de labels. numpy uniquement."""
+"""Splasher core: input protocol, grid, projection, label targets. numpy only."""
