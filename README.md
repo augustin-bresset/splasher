@@ -1,18 +1,20 @@
-<p align="center">
-  <img src="assets/logo.svg" alt="Splasher" width="360">
-</p>
+<div align="center">
 
-<p align="center">
-  <a href="https://github.com/augustin-bresset/splasher/actions/workflows/ci.yml"><img src="https://github.com/augustin-bresset/splasher/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
-  <a href="pyproject.toml"><img src="https://img.shields.io/badge/python-3.11%2B-blue.svg" alt="Python 3.11+"></a>
-  <a href="https://huggingface.co/spaces/SmaugC137/splasher"><img src="https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm.svg" alt="Open in Spaces"></a>
-</p>
+<img src="splasher/web/icon.svg" alt="Splasher logo" width="120" />
 
-<p align="center">
-  <b>▶ Try the live demo</b> — <a href="https://huggingface.co/spaces/SmaugC137/splasher">huggingface.co/spaces/SmaugC137/splasher</a>
-  <br><sub>no install, runs in your browser</sub>
-</p>
+# Splasher
+
+**Label synchronized channels — 3D point clouds, camera images — into a top-down BEV grid or per-point labels.**
+
+[![CI](https://github.com/augustin-bresset/splasher/actions/workflows/ci.yml/badge.svg)](https://github.com/augustin-bresset/splasher/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Live demo](https://img.shields.io/badge/demo-%F0%9F%A4%97%20Hugging%20Face-ffcc00)](https://huggingface.co/spaces/SmaugC137/splasher)
+
+[**▶ Live demo**](https://huggingface.co/spaces/SmaugC137/splasher) · [**Sibling tool: Toaster**](https://github.com/augustin-bresset/toaster) · [Quick start](#quick-start)
+
+</div>
 
 <p align="center">
   <img src="assets/demo-splasher.png" alt="Splasher labeling a lidar BEV grid, with 3D cloud and camera panels" width="900">
@@ -59,7 +61,7 @@ camera images, and paint labels on a top-down (BEV) view:
   frame**: a brush stroke on the accumulated cloud is **de-accumulated** back to each source
   frame. (Requires a `POSE` channel.)
 
-## Install & run
+## Quick start
 
 ```bash
 git clone https://github.com/augustin-bresset/splasher && cd splasher
