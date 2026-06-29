@@ -242,6 +242,14 @@ function wireControls() {
   $("open-file").onclick = openFsBrowser;
   $("fs-close").onclick = () => { $("fs-modal").hidden = true; };
   $("fs-modal").addEventListener("click", (e) => { if (e.target.id === "fs-modal") $("fs-modal").hidden = true; });
+  $("fs-input").onkeydown = async (e) => {
+    if (e.key === "Tab") { e.preventDefault(); await fsComplete(); }
+    else if (e.key === "Enter") {
+      e.preventDefault();
+      const v = $("fs-input").value.trim();
+      if (v) try { await fsNavigate(v); } catch { openFile(v); }   // dir → list, else open the file
+    }
+  };
 
   $("frame").oninput = (e) => { $("frame-label").textContent = `frame ${+e.target.value + 1} / ${session.n_frames}`; };
   $("frame").onchange = (e) => run(api.cmd("/api/frame", { index: +e.target.value }));
@@ -334,17 +342,38 @@ function renderOpenViews() {
     box.appendChild(row);
   }
 }
+function renderListing(d) {
+  fsPath = d.path;
+  const open = manager.openFilePaths();            // files already shown in views
+  const list = $("fs-list");
+  list.replaceChildren();
+  if (d.parent) list.appendChild(fsEntry({ name: "..", path: d.parent, is_dir: true, openable: true }, open));
+  for (const e of d.entries) list.appendChild(fsEntry(e, open));
+}
 async function fsNavigate(path) {
   try {
     const d = await api.fsList(path);
-    fsPath = d.path;
-    $("fs-path").textContent = d.path;
-    const open = manager.openFilePaths();          // files already shown in views
-    const list = $("fs-list");
-    list.replaceChildren();
-    if (d.parent) list.appendChild(fsEntry({ name: "..", path: d.parent, is_dir: true, openable: true }, open));
-    for (const e of d.entries) list.appendChild(fsEntry(e, open));
-  } catch (e) { $("fs-error").textContent = "⚠ " + e.message; }
+    renderListing(d);
+    $("fs-input").value = d.path.replace(/\/?$/, "/");   // show current dir, ready to type a child
+    $("fs-error").textContent = "";
+  } catch (e) { $("fs-error").textContent = "⚠ " + e.message; throw e; }
+}
+// Tab-complete the typed path against the directory it points into.
+async function fsComplete() {
+  const v = $("fs-input").value;
+  const slash = v.lastIndexOf("/");
+  const dir = slash <= 0 ? "/" : v.slice(0, slash);
+  const partial = v.slice(slash + 1);
+  let d;
+  try { d = await api.fsList(dir); } catch { return; }
+  renderListing(d);
+  const matches = d.entries.filter((e) => e.name.startsWith(partial));
+  if (!matches.length) return;
+  let lcp = matches[0].name;                         // longest common prefix
+  for (const m of matches) while (!m.name.startsWith(lcp)) lcp = lcp.slice(0, -1);
+  let done = (dir === "/" ? "" : dir) + "/" + lcp;
+  if (matches.length === 1 && matches[0].is_dir) done += "/";
+  $("fs-input").value = done;
 }
 function fsEntry(e, open) {
   const loaded = !e.is_dir && open.has(e.path);
