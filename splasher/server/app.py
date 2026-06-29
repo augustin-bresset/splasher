@@ -1,0 +1,215 @@
+"""FastAPI app: drives an `engine.Session` over REST and serves the web front.
+
+Each command returns the updated `ViewState` so a front renders in one round-trip.
+Operations are synchronous (numpy): a single shared `Session` is served. The
+"grid already labeled" confirmation is left to the front (see `/api/grid/labelled_count`).
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from ..core.grid import Grid
+from ..engine.session import Session
+from .files import list_dir, open_file
+from .protocol import encode_array, grid_from_dict, session_info_to_dict, view_state_to_dict
+
+# Web front (vanilla, zero build) served as-is — `web/` directory at the repo root.
+WEB_DIR = Path(__file__).resolve().parents[2] / "web"
+
+
+def _as_session(session_or_source, labels) -> Session:
+    if isinstance(session_or_source, Session):
+        return session_or_source
+    return Session(session_or_source, labelset=labels)
+
+
+def create_app(session_or_source, *, labels=None):
+    from pathlib import Path as _Path
+
+    from fastapi import Body, FastAPI, HTTPException
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import FileResponse
+    from fastapi.staticfiles import StaticFiles
+
+    session = _as_session(session_or_source, labels)
+    app = FastAPI(title="Splasher API", version="1.0")
+
+    # The front may be served from another origin (dev): allow everything.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
+    )
+
+    def view() -> dict:
+        return view_state_to_dict(session.view_state())
+
+    # ----------------------------------------------------------- reads
+    @app.get("/api/session")
+    def get_session() -> dict:
+        return session_info_to_dict(session.info())
+
+    @app.get("/api/view")
+    def get_view() -> dict:
+        return view()
+
+    @app.get("/api/grid/labelled_count")
+    def grid_labelled_count() -> dict:
+        return {"count": session.grid_labelled_count()}
+
+    # ----------------------------------------------------------- settings
+    @app.post("/api/frame")
+    def set_frame(payload: dict = Body(...)) -> dict:
+        session.set_frame(int(payload["index"]))
+        return view()
+
+    @app.post("/api/class")
+    def set_class(payload: dict = Body(...)) -> dict:
+        session.set_active_class(int(payload["id"]))
+        return view()
+
+    @app.post("/api/tool")
+    def set_tool(payload: dict = Body(...)) -> dict:
+        session.set_tool(str(payload["tool"]))
+        return view()
+
+    @app.post("/api/targets")
+    def set_targets(payload: dict = Body(...)) -> dict:
+        session.set_active_targets(payload["targets"])
+        return view()
+
+    @app.post("/api/accum")
+    def set_accum(payload: dict = Body(...)) -> dict:
+        session.set_accum_radius(int(payload["radius"]))
+        return view()
+
+    @app.post("/api/bev_mode")
+    def set_bev_mode(payload: dict = Body(...)) -> dict:
+        session.set_bev_mode(str(payload["mode"]))
+        return view()
+
+    @app.post("/api/labelset")
+    def set_labelset(payload: dict = Body(...)) -> dict:
+        try:
+            session.set_labelset(payload)
+        except (KeyError, TypeError, ValueError) as e:
+            raise HTTPException(422, f"invalid labelset: {e}")
+        return view()
+
+    @app.post("/api/visibility")
+    def set_visibility(payload: dict = Body(...)) -> dict:
+        if "clouds" in payload:
+            session.set_visible_clouds(payload["clouds"])
+        if "images" in payload:
+            session.set_visible_images(payload["images"])
+        return view()
+
+    # ----------------------------------------------------------- labeling
+    def _rect(payload: dict):
+        r = payload["rect"]
+        if len(r) != 4:
+            raise HTTPException(422, "rect expects [x0, y0, x1, y1]")
+        return tuple(float(v) for v in r)
+
+    @app.post("/api/paint")
+    def paint(payload: dict = Body(...)) -> dict:
+        session.paint_rect(_rect(payload))
+        return view()
+
+    @app.post("/api/erase")
+    def erase(payload: dict = Body(...)) -> dict:
+        session.erase_rect(_rect(payload))
+        return view()
+
+    @app.post("/api/select")
+    def select(payload: dict = Body(...)) -> dict:
+        session.select_rect(_rect(payload), op=str(payload.get("op", "add")))
+        return view()
+
+    @app.post("/api/selection/apply")
+    def apply_selection() -> dict:
+        session.apply_selection()
+        return view()
+
+    @app.post("/api/selection/clear")
+    def clear_selection() -> dict:
+        session.clear_selection()
+        return view()
+
+    @app.post("/api/clear")
+    def clear_frame() -> dict:
+        session.clear_frame()
+        return view()
+
+    @app.post("/api/undo")
+    def undo() -> dict:
+        session.undo()
+        return view()
+
+    # ----------------------------------------------------------- grid / io
+    @app.post("/api/grid")
+    def commit_grid(payload: dict = Body(...)) -> dict:
+        try:
+            grid = grid_from_dict(payload)
+        except (KeyError, ValueError) as e:
+            raise HTTPException(422, f"invalid grid: {e}")
+        session.commit_grid(grid)
+        return view()
+
+    @app.post("/api/save")
+    def save(payload: dict = Body(...)) -> dict:
+        out = session.save(payload["dir"])
+        return {"ok": True, "dir": str(out)}
+
+    @app.post("/api/load")
+    def load(payload: dict = Body(...)) -> dict:
+        try:
+            session.load(payload["dir"])
+        except (FileNotFoundError, OSError) as e:
+            raise HTTPException(404, f"cannot load: {e}")
+        return view()
+
+    # ----------------------------------------------------------- file viewer (browse + open)
+    @app.get("/api/fs")
+    def fs_list(path: str | None = None) -> dict:
+        try:
+            return list_dir(path)
+        except (FileNotFoundError, NotADirectoryError, PermissionError, OSError) as e:
+            raise HTTPException(400, str(e))
+
+    @app.post("/api/fs/open")
+    def fs_open(payload: dict = Body(...)) -> dict:
+        try:
+            res = open_file(payload["path"])
+        except (FileNotFoundError, ValueError, OSError) as e:
+            raise HTTPException(422, str(e))
+        if res["kind"] == "cloud":
+            return {"kind": "cloud", "name": res["name"], "path": res["path"],
+                    "points": encode_array(res["points"])}
+        out = {"kind": "image", "name": res["name"], "path": res["path"]}
+        if "image" in res:                 # a numpy image array (e.g. .npy HxWxC)
+            out["image"] = encode_array(res["image"])
+        return out
+
+    @app.get("/api/fs/raw")
+    def fs_raw(path: str):
+        p = _Path(path).expanduser()
+        if not p.is_file():
+            raise HTTPException(404, "not a file")
+        return FileResponse(str(p))
+
+    # Web front mounted last (on "/"): the /api/* and /docs routes, registered before,
+    # keep priority. `html=True` serves index.html at the root.
+    if WEB_DIR.is_dir():
+        app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
+
+    app.state.session = session
+    return app
+
+
+def serve(session_or_source, *, host: str = "127.0.0.1", port: int = 8000, labels=None):
+    import uvicorn
+
+    app = create_app(session_or_source, labels=labels)
+    uvicorn.run(app, host=host, port=port)
+    return app
