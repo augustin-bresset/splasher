@@ -8,41 +8,6 @@ import { viridis, finiteRange, hexToRgb } from "../colors.js";
 
 const MAX_POINTS = 12000;
 
-// Grid enclosing a point cloud's xy (mirror of core.grid_from_points).
-function gridFromPoints(p, cell = 1.0, margin = 2.0) {
-  const [n, stride] = p.shape;
-  let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
-  for (let i = 0; i < n; i++) {
-    const x = p.data[i * stride], y = p.data[i * stride + 1];
-    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-    if (x < xmin) xmin = x; if (x > xmax) xmax = x; if (y < ymin) ymin = y; if (y > ymax) ymax = y;
-  }
-  if (!Number.isFinite(xmin)) return { xmin: -10, xmax: 10, ymin: -10, ymax: 10, cell_size: cell, cols: 20, rows: 20 };
-  xmin = Math.floor(xmin - margin); ymin = Math.floor(ymin - margin);
-  xmax = Math.ceil(xmax + margin); ymax = Math.ceil(ymax + margin);
-  return {
-    xmin, xmax, ymin, ymax, cell_size: cell,
-    cols: Math.max(1, Math.ceil((xmax - xmin) / cell)),
-    rows: Math.max(1, Math.ceil((ymax - ymin) / cell)),
-  };
-}
-
-// Max-height (z) per cell, NaN where empty — the BEV underlay for a standalone cloud.
-function heightField(p, g) {
-  const { rows, cols } = g;
-  const out = new Float32Array(rows * cols).fill(NaN);
-  const [n, stride] = p.shape;
-  for (let i = 0; i < n; i++) {
-    const x = p.data[i * stride], y = p.data[i * stride + 1], z = p.data[i * stride + 2];
-    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
-    const j = Math.floor((x - g.xmin) / g.cell_size), ii = Math.floor((y - g.ymin) / g.cell_size);
-    if (j < 0 || j >= cols || ii < 0 || ii >= rows) continue;
-    const idx = ii * cols + j;
-    if (Number.isNaN(out[idx]) || z > out[idx]) out[idx] = z;
-  }
-  return { data: out, shape: [rows, cols] };
-}
-
 export class BevView {
   constructor(stage, cbs) {
     this.cbs = cbs;                  // { getTool, onRect(rect, button) }
@@ -60,7 +25,6 @@ export class BevView {
     this._accentSel = [87, 232, 255]; // theme accent-hi (rgb) for selection fill / ripples
     this._ripples = [];              // active annotation ripples (splash feedback)
     this._raf = null;
-    this._standalone = null;         // a loaded file cloud shown in the BEV (overrides the dataset)
 
     this.scale = 10; this.cx = 0; this.cy = 0; this._sig = null;
     this._drag = null;               // {mode:'rect'|'pan', x0,y0, ...}
@@ -73,20 +37,10 @@ export class BevView {
   setPalette(p) { this.palette = p; }
 
   setView(view) {
-    if (this._standalone) return;     // a loaded file cloud is shown; ignore dataset updates
     this.view = view;
     const g = view.grid;
     const sig = `${g.xmin},${g.ymin},${g.cols},${g.cell_size}`;
     if (sig !== this._sig) { this._sig = sig; this._fit(); }
-    this.render();
-  }
-
-  // Show a just-loaded point cloud (file viewer): fit a grid + height underlay to it.
-  setRawCloud(points) {
-    const grid = gridFromPoints(points);
-    this._standalone = { grid, points, bevField: heightField(points, grid), gridLabels: null, selection: null };
-    this.view = this._standalone;
-    this._fit();
     this.render();
   }
 

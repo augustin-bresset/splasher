@@ -18,6 +18,7 @@ let view = null;
 let bev = null, manager = null, lut = null;
 let playTimer = null;
 let fsPath = null;        // current directory in the file browser
+let fileMode = false;     // empty launch → file-viewer mode (clouds = references, grid persists)
 
 function currentTheme() {
   let t = null;
@@ -59,8 +60,11 @@ async function boot() {
   bev = new BevView($("bev-stage"), { getTool: () => (view ? view.tool : "paint"), onRect: onBevRect });
   bev.setPalette(lut);
 
+  fileMode = session.n_frames === 0;   // launched empty → file-viewer mode
+
   manager = new PanelManager($("views-stack"), {
-    session, palette: lut, onChange: refreshVisibility, sensors: sensorsFromSession(),
+    session, palette: lut, onChange: refreshVisibility, onFiles: onFilesChanged,
+    sensors: sensorsFromSession(),
   });
 
   buildClasses();
@@ -73,7 +77,7 @@ async function boot() {
   wireGutters();
 
   // Default views (dataset mode only): one 3D cloud (all) + one camera (the first).
-  if (session.n_frames > 0) {
+  if (!fileMode) {
     if (session.cloud_keys.length) manager.add({ type: "cloud", channel: null }, true);
     if (session.image_keys.length) manager.add({ type: "cam", channel: session.image_keys[0] }, true);
   }
@@ -130,6 +134,21 @@ function buildClasses() {
 function buildClouds() {
   const box = $("clouds");
   box.innerHTML = "";
+  if (fileMode) {
+    // file-viewer: pick which open lidar views compose the BEV (combined = accumulate).
+    const clouds = manager.openClouds();
+    if (!clouds.length) { box.innerHTML = `<span class="muted">open a cloud file</span>`; return; }
+    for (const c of clouds) {
+      const row = document.createElement("label");
+      row.className = "channel-item";
+      const cb = document.createElement("input");
+      cb.type = "checkbox"; cb.checked = true; cb.dataset.path = c.path;
+      cb.onchange = updateSourceFromClouds;
+      row.append(cb, document.createTextNode(" " + pretty(c.name)));
+      box.appendChild(row);
+    }
+    return;
+  }
   if (!session.cloud_keys.length) { box.innerHTML = `<span class="muted">no cloud</span>`; return; }
   for (const name of session.cloud_keys) {
     const row = document.createElement("label");
@@ -143,7 +162,22 @@ function buildClouds() {
 }
 
 function pickClouds() {
-  return [...$("clouds").querySelectorAll("input:checked")].map((cb) => cb.dataset.name);
+  return [...$("clouds").querySelectorAll("input[data-name]:checked")].map((cb) => cb.dataset.name);
+}
+
+// File-viewer: send the checked open clouds as the (labelable) session source.
+function updateSourceFromClouds() {
+  const paths = [...$("clouds").querySelectorAll("input[data-path]:checked")].map((cb) => cb.dataset.path);
+  const clouds = manager.openClouds();
+  const first = clouds.find((c) => paths.includes(c.path));
+  if (first) $("export-name").value = first.name.replace(/\.[^.]+$/, "") + "_bev.npy";
+  run(api.cmd("/api/source/files", { paths }));
+}
+
+// Open/close of a file view → refresh the clouds selector, the source, and the open-list.
+function onFilesChanged() {
+  if (fileMode) { buildClouds(); updateSourceFromClouds(); }
+  renderOpenViews();
 }
 
 function buildAddBar() {
@@ -230,6 +264,13 @@ function wireControls() {
     const dir = $("io-dir").value.trim();
     if (!dir) return ($("status").textContent = "⚠ enter a folder to load");
     try { const v = await api.load(dir); fillGridForm(v.grid); apply(v); $("status").textContent = "loaded from " + dir; }
+    catch (e) { $("status").textContent = "⚠ " + e.message; }
+  };
+  $("btn-export").onclick = async () => {
+    const dir = $("io-dir").value.trim();
+    const name = $("export-name").value.trim() || "bev.npy";
+    if (!dir) return ($("status").textContent = "⚠ enter an output folder");
+    try { const r = await api.export(dir, name); $("status").textContent = "exported " + r.path; }
     catch (e) { $("status").textContent = "⚠ " + e.message; }
   };
 
@@ -321,12 +362,8 @@ function fsEntry(e, open) {
 }
 async function openFile(path) {
   try {
-    const d = await api.fsOpen(path);          // 3D cloud or image, per the file
-    manager.addFile(d);
-    // File-viewer mode: also drop the loaded cloud into the BEV (top-down) view.
-    if (d.kind === "cloud" && session.n_frames === 0) bev.setRawCloud(d.points);
+    manager.addFile(await api.fsOpen(path));   // triggers onFiles (clouds + source + open-list)
     $("fs-error").textContent = "";
-    renderOpenViews();                         // keep the browser open; show it in "Open views"
     fsNavigate(fsPath);                        // refresh the "open" markers
   } catch (e) { $("fs-error").textContent = "⚠ " + e.message; }
 }

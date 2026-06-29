@@ -71,6 +71,7 @@ export const api = {
   // I/O: non-ViewState responses.
   save: (dir) => postJson("/api/save", { dir }),
   load: async (dir) => decodeView(await postJson("/api/load", { dir })),
+  export: (dir, name) => postJson("/api/export", { dir, name }),
 
   // File viewer: browse the filesystem and open single files.
   fsList: async (path) => {

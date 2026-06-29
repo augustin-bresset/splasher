@@ -11,11 +11,12 @@ import { growGutter } from "./resize.js";
 import { pretty } from "./colors.js";
 
 export class PanelManager {
-  constructor(stackEl, { session, palette, onChange, sensors = [] }) {
+  constructor(stackEl, { session, palette, onChange, onFiles = null, sensors = [] }) {
     this.stack = stackEl;
     this.session = session;
     this.palette = palette;
     this.onChange = onChange;
+    this.onFiles = onFiles;          // called when file views are added/removed
     this.sensors = sensors;
     this.panels = [];
     this.view = null;
@@ -125,6 +126,7 @@ export class PanelManager {
     if (p.view) p.view.dispose();
     this._relayout();
     if (p.type === "cam") this.onChange();
+    if (p.path && this.onFiles) this.onFiles();
   }
 
   _onSelect(panel) {
@@ -190,7 +192,13 @@ export class PanelManager {
     el.append(head, body);
     this.panels.push(panel);
     this._relayout();
+    if (this.onFiles) this.onFiles();
     return panel;
+  }
+
+  // Open cloud views (for the "Clouds (BEV)" selector → session source).
+  openClouds() {
+    return this.panels.filter((p) => p.type === "file-cloud").map((p) => ({ id: p.id, name: p.name, path: p.path }));
   }
 
   update(view) {

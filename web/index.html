@@ -73,6 +73,13 @@
 
         <section class="panel">
           <h2>Clouds (BEV)</h2>
+          <label class="mode-row">color
+            <select id="bev-mode" title="BEV coloring">
+              <option value="height">Height</option>
+              <option value="intensity">Intensity</option>
+              <option value="normal">Normal</option>
+            </select>
+          </label>
           <div id="clouds" class="channels"></div>
         </section>
 
@@ -102,6 +109,8 @@
             <button id="btn-save" class="btn">Save</button>
             <button id="btn-load" class="btn">Load</button>
           </div>
+          <input id="export-name" type="text" placeholder="name_bev.npy" />
+          <button id="btn-export" class="btn-primary">Export BEV</button>
         </section>
       </aside>
 
@@ -111,11 +120,6 @@
       <div class="workspace">
         <section class="vpanel bev-panel">
           <div class="vpanel-head"><span class="vpanel-title">Top-down (BEV)</span>
-            <select id="bev-mode" title="BEV underlay">
-              <option value="height">Height</option>
-              <option value="density">Density</option>
-              <option value="intensity">Intensity</option>
-            </select>
             <span id="bev-hint" class="muted"></span></div>
           <div id="bev-stage" class="vpanel-body bev-stage"></div>
         </section>

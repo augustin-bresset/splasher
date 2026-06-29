@@ -125,6 +125,10 @@ input[type="range"] { width: 100%; cursor: pointer; }
 .class-item.active { background: var(--panel-2); border-left-color: var(--accent); }
 .swatch { width: 13px; height: 13px; flex: none; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2); }
 
+.mode-row { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); margin-bottom: 9px; }
+.mode-row select { flex: 1; }
+#export-name { margin-top: 8px; }
+
 .channels { display: flex; flex-direction: column; gap: 4px; }
 .channel-item { display: flex; align-items: center; gap: 8px; padding: 3px 2px; font-family: var(--mono); font-size: 12px; }
 input[type="checkbox"] { cursor: pointer; }
