@@ -28,8 +28,10 @@ class Grid:
     cell_size: float
 
     def __post_init__(self) -> None:
-        if self.cell_size <= 0:
-            raise ValueError("cell_size must be > 0")
+        if not math.isfinite(self.cell_size) or self.cell_size <= 0:
+            raise ValueError("cell_size must be a finite number > 0")
+        if not all(math.isfinite(v) for v in (self.xmin, self.xmax, self.ymin, self.ymax)):
+            raise ValueError("extent must be finite (no NaN/inf bounds)")
         if self.xmax <= self.xmin or self.ymax <= self.ymin:
             raise ValueError("invalid extent (xmax > xmin and ymax > ymin required)")
 
@@ -101,8 +103,13 @@ class Grid:
 
 def grid_from_points(xy: np.ndarray, cell_size: float = 1.0,
                      margin: float = 2.0) -> Grid:
-    """Default grid enclosing a top-down point cloud `xy` (N, 2)."""
+    """Default grid enclosing a top-down point cloud `xy` (N, 2).
+
+    Non-finite points (NaN/inf, common for invalid lidar returns) are ignored; if none
+    remain, a neutral default extent is returned rather than a NaN grid.
+    """
     xy = np.asarray(xy, dtype=np.float64).reshape(-1, 2)
+    xy = xy[np.isfinite(xy).all(axis=1)]
     if len(xy) == 0:
         return Grid(-10.0, 10.0, -10.0, 10.0, cell_size)
     lo = np.floor(xy.min(axis=0) - margin)
