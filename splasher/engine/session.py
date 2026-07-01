@@ -22,7 +22,13 @@ from ..core.projection import (
     cells_in_rect,
     points_in_rect,
 )
-from ..core.source import ChannelKind, Source, channels_of_kind
+from ..core.source import (
+    ChannelKind,
+    Source,
+    channels_of_kind,
+    ordered_features,
+    point_features,
+)
 from ..core.target import GridTarget, PointTarget
 from .view_state import SessionInfo, ViewState
 
@@ -54,6 +60,10 @@ class Session:
         self.image_keys = channels_of_kind(source, ChannelKind.IMAGE)
         pose_keys = channels_of_kind(source, ChannelKind.POSE)
         self.pose_key = pose_keys[0] if pose_keys else None
+        # Per-point scalar features (`<cloud>_<suffix>` sibling channels) → trailing columns.
+        self.point_features = point_features(source, self.cloud_keys)
+        self.feature_names = self._feature_names()
+        self.set_bev_mode(self.bev_mode)   # drop a feature underlay the new source no longer has
         self.accum_radius = 0
         self.visible_clouds: set[str] = set(self.cloud_keys)
         self.visible_images: set[str] = set(self.image_keys)
@@ -62,6 +72,20 @@ class Session:
             self.grid = self._default_grid()
             self.grid_target = GridTarget(self.grid, ignore_id=self.labelset.ignore_id)
         self.point_target = PointTarget(ignore_id=self.labelset.ignore_id)
+
+    def _feature_names(self) -> list[str]:
+        """Ordered per-point scalar features the views can color by. Sibling scalar channels
+        (apairo convention) plus, if any cloud has a native 4th column and no sibling one, an
+        `intensity` feature (KITTI-style x,y,z,intensity)."""
+        names = {feat for feats in self.point_features.values() for feat in feats}
+        if "intensity" not in names and len(self.source) and self.cloud_keys:
+            frame = self.source[0]
+            for k in self.cloud_keys:
+                a = frame.channels.get(k)
+                if a is not None and np.asarray(a).ndim == 2 and np.asarray(a).shape[1] >= 4:
+                    names.add("intensity")
+                    break
+        return ordered_features(names)
 
     # ================================================================ info
     def info(self) -> SessionInfo:
@@ -72,6 +96,7 @@ class Session:
             cloud_keys=list(self.cloud_keys),
             image_keys=list(self.image_keys),
             pose_key=self.pose_key,
+            feature_names=list(self.feature_names),
         )
 
     @property
@@ -110,7 +135,9 @@ class Session:
         self.accum_radius = max(0, min(int(radius), cap))
 
     def set_bev_mode(self, mode: str) -> None:
-        self.bev_mode = mode if mode in ("height", "density", "intensity", "normal") else "height"
+        """BEV underlay: 'height' | 'density' | 'normal', or any per-point feature name."""
+        valid = mode in ("height", "density", "normal") or mode in self.feature_names
+        self.bev_mode = mode if valid else "height"
 
     def set_labelset(self, data: dict) -> None:
         """Replace the labeling class set (ids/names/colors). `ignore_id` stays the unlabeled id.
@@ -259,7 +286,7 @@ class Session:
             points=pts,
             point_labels=plabels,
             point_channels=pchans,
-            bev_field=bev_field(acc.points[vis], self.grid, self.bev_mode),
+            bev_field=bev_field(acc.points[vis], self.grid, self.bev_mode, self.feature_names),
             grid_labels=grid_labels,
             selection=self.selection,
             images=images,
@@ -292,11 +319,14 @@ class Session:
         """Accumulate over **all** cloud channels (stable point_id); ±radius via poses."""
         n = len(self.source)
         if n == 0:
-            return accumulate(self.source, self.index, [], self.cloud_keys, self.pose_key)
+            return accumulate(self.source, self.index, [], self.cloud_keys, self.pose_key,
+                              self.point_features, self.feature_names)
         if self.accum_radius > 0 and self.pose_key is not None:
             idx = window_indices(self.index, self.accum_radius, n)
-            return accumulate(self.source, self.index, idx, self.cloud_keys, self.pose_key)
-        return accumulate(self.source, self.index, [self.index], self.cloud_keys, self.pose_key)
+            return accumulate(self.source, self.index, idx, self.cloud_keys, self.pose_key,
+                              self.point_features, self.feature_names)
+        return accumulate(self.source, self.index, [self.index], self.cloud_keys, self.pose_key,
+                          self.point_features, self.feature_names)
 
     def _accumulated_labels(self, acc: Accumulation) -> np.ndarray:
         """Per-point labels aligned with `acc.points` (ignore_id by default, reverse de-accumulation)."""

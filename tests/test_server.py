@@ -69,7 +69,7 @@ def test_file_viewer_empty_session_and_fs(tmp_path) -> None:
 
     c = TestClient(create_app(ArraySource([], [])))   # empty = file-viewer mode
     assert c.get("/api/session").json()["n_frames"] == 0
-    assert decode_array(c.get("/api/view").json()["points"]).shape == (0, 3)
+    assert decode_array(c.get("/api/view").json()["points"]).shape == (0, 3)  # no clouds, no features
 
     np.save(tmp_path / "scan.npy", np.random.rand(20, 4).astype(np.float32))
     (tmp_path / "note.txt").write_text("nope")
@@ -104,3 +104,34 @@ def test_save_load_via_api(client: TestClient, tmp_path) -> None:
     assert r.status_code == 200 and r.json()["ok"]
     d = client.post("/api/load", json={"dir": str(tmp_path)}).json()
     assert decode_array(d["grid_labels"]) is not None
+
+
+def test_open_file_gathers_sibling_features(tmp_path) -> None:
+    """File viewer (no apairo): a cloud + its `<base>_<suffix>.npy` siblings load together as
+    `[x, y, z, *feature_names]`, opening either the coordinate file or a feature file."""
+    from splasher.server.files import open_file
+
+    xyz = np.random.rand(6, 3).astype(np.float32)
+    inten = np.arange(6, dtype=np.uint8)
+    rng = np.linspace(0.0, 1.0, 6, dtype=np.float32)
+    np.save(tmp_path / "000000.npy", xyz)
+    np.save(tmp_path / "000000_intensity.npy", inten)
+    np.save(tmp_path / "000000_range.npy", rng)
+
+    res = open_file(str(tmp_path / "000000.npy"))          # open the coordinate cloud
+    assert res["kind"] == "cloud" and res["feature_names"] == ["intensity", "range"]
+    assert res["points"].shape == (6, 5)
+    np.testing.assert_allclose(res["points"][:, 3], inten)
+    np.testing.assert_allclose(res["points"][:, 4], rng)
+
+    res2 = open_file(str(tmp_path / "000000_intensity.npy"))   # open a lone (N,) feature file
+    assert res2["feature_names"] == ["intensity", "range"] and res2["points"].shape == (6, 5)
+    assert res2["name"] == "000000_intensity.npy"         # the panel keeps the opened file's name
+
+
+def test_open_file_lone_scalar_without_coords_errors(tmp_path) -> None:
+    from splasher.server.files import open_file
+
+    np.save(tmp_path / "lonely_intensity.npy", np.arange(4, dtype=np.uint8))
+    with pytest.raises(ValueError, match="no coordinate cloud"):
+        open_file(str(tmp_path / "lonely_intensity.npy"))

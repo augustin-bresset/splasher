@@ -78,6 +78,55 @@ def test_accumulate_two_channels_chan_and_point_ids():
     assert vis.tolist() == [False, False, False, True, True]
 
 
+def test_point_features_maps_sibling_channels():
+    from splasher.core.source import ordered_features, point_features
+
+    specs = [
+        ChannelSpec("velodyne_0", ChannelKind.POINTCLOUD, np.dtype("float32"), (None, 3)),
+        ChannelSpec("velodyne_0_intensity", ChannelKind.SCALAR, np.dtype("uint8"), (None,)),
+        ChannelSpec("velodyne_0_range", ChannelKind.SCALAR, np.dtype("float32"), (None,)),
+        ChannelSpec("pose", ChannelKind.POSE, np.dtype("float32"), (4, 4)),
+    ]
+    # every sibling scalar becomes a named feature; unrelated kinds (pose) never pair.
+    assert point_features(specs, ["velodyne_0"]) == {
+        "velodyne_0": {"intensity": "velodyne_0_intensity", "range": "velodyne_0_range"}
+    }
+    # a cloud with no sibling scalar is simply absent from the mapping
+    assert point_features(specs, ["lidar_other"]) == {}
+    # column order: intensity first (keeps col 3), then alphabetical
+    assert ordered_features({"range", "intensity", "azimuth"}) == ["intensity", "azimuth", "range"]
+
+
+def test_accumulate_folds_features_into_trailing_columns():
+    specs = [
+        ChannelSpec("velodyne_0", ChannelKind.POINTCLOUD, np.dtype("float32"), (None, 3)),
+        ChannelSpec("velodyne_0_intensity", ChannelKind.SCALAR, np.dtype("uint8"), (None,)),
+        ChannelSpec("velodyne_0_range", ChannelKind.SCALAR, np.dtype("float32"), (None,)),
+    ]
+    xyz = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], np.float32)
+    inten = np.array([12, 200], np.uint8)                    # (N,) sidecars, KITTI/Tartan-style
+    rng = np.array([7.5, 8.5], np.float32)
+    src = ArraySource(specs, [{"velodyne_0": xyz, "velodyne_0_intensity": inten,
+                               "velodyne_0_range": rng}])
+
+    fmap = {"velodyne_0": {"intensity": "velodyne_0_intensity", "range": "velodyne_0_range"}}
+    acc = accumulate(src, 0, [0], ["velodyne_0"], None, fmap, ["intensity", "range"])
+    assert acc.points.shape == (2, 5)                        # [x, y, z, intensity, range]
+    np.testing.assert_allclose(acc.points[:, :3], xyz)
+    np.testing.assert_allclose(acc.points[:, 3], [12.0, 200.0])
+    np.testing.assert_allclose(acc.points[:, 4], [7.5, 8.5])
+
+
+def test_accumulate_missing_feature_is_nan():
+    specs = [ChannelSpec("lidar", ChannelKind.POINTCLOUD, np.dtype("float32"), (None, 3))]
+    src = ArraySource(specs, [{"lidar": np.zeros((3, 3), np.float32)}])
+    acc = accumulate(src, 0, [0], ["lidar"], None, None, ["intensity"])
+    assert acc.points.shape == (3, 4)
+    assert np.isnan(acc.points[:, 3]).all()
+    # no feature layout requested → plain xyz
+    assert accumulate(src, 0, [0], ["lidar"], None).points.shape == (3, 3)
+
+
 def test_accumulate_skips_frames_missing_pose():
     # A real (apairo) source can yield frames lacking the pose channel after sync;
     # accumulate must skip those for registration instead of crashing.

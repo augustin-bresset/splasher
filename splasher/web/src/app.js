@@ -69,6 +69,7 @@ async function boot() {
 
   buildClasses();
   buildClouds();
+  buildBevModes();
   buildAddBar();
   buildThemeSelect();
   applyTheme(currentTheme());     // sets data-theme + 3D background before panels are added
@@ -134,6 +135,20 @@ function buildClasses() {
   }
 }
 
+// BEV underlay modes: Height, one entry per per-point feature (intensity, range…), Normal.
+function buildBevModes() {
+  const sel = $("bev-mode");
+  const opts = [["height", "Height"],
+                ...(session.feature_names || []).map((n) => [n, pretty(n)]),
+                ["normal", "Normal"]];
+  sel.replaceChildren();
+  for (const [value, label] of opts) {
+    const o = document.createElement("option");
+    o.value = value; o.textContent = label;
+    sel.appendChild(o);
+  }
+}
+
 function buildClouds() {
   const box = $("clouds");
   box.innerHTML = "";
@@ -169,12 +184,14 @@ function pickClouds() {
 }
 
 // File-viewer: send the checked open clouds as the (labelable) session source.
-function updateSourceFromClouds() {
+async function updateSourceFromClouds() {
   const paths = [...$("clouds").querySelectorAll("input[data-path]:checked")].map((cb) => cb.dataset.path);
   const clouds = manager.openClouds();
   const first = clouds.find((c) => paths.includes(c.path));
   if (first) $("export-name").value = first.name.replace(/\.[^.]+$/, "") + "_bev.npy";
-  run(api.cmd("/api/source/files", { paths }));
+  await run(api.cmd("/api/source/files", { paths }));
+  session = await api.session();   // the combined source's feature list may have changed
+  buildBevModes();
 }
 
 // Open/close of a file view → refresh the clouds selector, the source, and the open-list.

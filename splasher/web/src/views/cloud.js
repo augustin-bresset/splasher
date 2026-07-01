@@ -63,7 +63,7 @@ export class CloudView {
     this.palette = { colors: new Map(), ignore: 0 };
     this.view = null;
     this.channel = null;            // null = all channels, otherwise a cloud_keys index
-    this.colorBy = "height";        // "height" (z) | "intensity" (4th column, if present)
+    this.colorBy = "height";        // "height" (z) | feature index i (column 3+i, if present)
     this.running = true;
     this._framed = false;           // auto-fit the camera on the first non-empty cloud
 
@@ -137,8 +137,9 @@ export class CloudView {
     const [n, stride] = p.shape;
     const labels = this.view.pointLabels ? this.view.pointLabels.data : null;
     const chans = this.view.pointChannels ? this.view.pointChannels.data : null;
-    // Scalar driving the gradient: intensity = 4th column when available, else height (z).
-    const sCol = (this.colorBy === "intensity" && stride >= 4) ? 3 : 2;
+    // Scalar driving the gradient: a feature column (3 + index) when present, else height (z).
+    const fCol = typeof this.colorBy === "number" ? 3 + this.colorBy : -1;
+    const sCol = fCol >= 0 && fCol < stride ? fCol : 2;
     const keep = (i) => this.channel === null || !chans || chans[i] === this.channel;
     const isFin = Number.isFinite;
     // A point is usable only if its x/y/z are finite (lidar returns can carry NaN/Inf).

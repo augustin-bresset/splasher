@@ -69,6 +69,7 @@ def session_info_to_dict(info: SessionInfo) -> dict:
         "image_keys": info.image_keys,
         "pose_key": info.pose_key,
         "has_pose": info.has_pose,
+        "feature_names": list(info.feature_names),
         "labelset": info.labelset.to_dict(),
         "channels": [channelspec_to_dict(s) for s in info.channels],
     }

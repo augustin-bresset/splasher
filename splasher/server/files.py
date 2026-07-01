@@ -1,8 +1,14 @@
 """Filesystem browsing + single-file loading for the *file viewer* mode.
 
 Lets the front browse the (local) filesystem and open individual files into views:
-point clouds are decoded to `(N, >=3)` float32 arrays here; images are streamed raw and
+point clouds are decoded to `(N, 3+F)` float32 arrays here; images are streamed raw and
 decoded by the browser. Unreadable / unsupported files raise with a clear message.
+
+Per-point scalar features may live in sibling `<base>_<suffix>.npy` files (shape `(N,)`) —
+the same `<cloud>_<suffix>` convention apairo uses for suffixed sub-channels (e.g. a Tartan
+`000000_intensity.npy` beside `000000.npy`). Opening any member of the group loads the
+coordinate cloud plus every sibling feature as trailing named columns (`feature_names`), so
+the viewer can color by any of them. A native 4th column is surfaced as `intensity`.
 
 Local use only (the server binds to 127.0.0.1).
 """
@@ -12,6 +18,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+
+from ..core.source import ordered_features
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tif", ".tiff"}
 CLOUD_EXTS = {".npy", ".bin", ".pcd"}
@@ -46,9 +54,13 @@ def open_file(path: str) -> dict:
     """Open a file.
 
     Returns one of:
-    - `{kind:"cloud", points: (N,>=3) ndarray}`,
+    - `{kind:"cloud", points: (N,3+F) ndarray, feature_names: [...]}`,
     - `{kind:"image", image: (H,W,C) ndarray}`  (decoded array, e.g. a `.npy` image),
     - `{kind:"image"}`  (raster file like .png/.jpg — streamed raw, decoded by the browser).
+
+    A cloud's `points` are `[x, y, z, *feature_names]`: the trailing columns are per-point
+    scalar features gathered from sibling `<base>_<suffix>.npy` files (and a native 4th
+    column, as `intensity`). See `_cloud_group`.
     """
     p = Path(path).expanduser()
     if not p.is_file():
@@ -56,18 +68,87 @@ def open_file(path: str) -> dict:
     ext = p.suffix.lower()
     base = {"name": p.name, "path": str(p)}
 
-    if ext == ".npy":                      # a .npy can hold either an image or a cloud
+    if ext == ".npy":                      # a .npy can hold an image, a cloud, or a scalar feature
         arr = np.asarray(np.load(p))
         if arr.ndim == 3 and arr.shape[2] in (1, 3, 4):
             return {"kind": "image", "image": arr, **base}
         if arr.ndim == 2 and arr.shape[1] >= 3:
-            return {"kind": "cloud", "points": arr.astype(np.float32), **base}
-        raise ValueError(f".npy shape {arr.shape} is neither an (N,>=3) cloud nor an (H,W,1/3/4) image")
+            pts, names = _cloud_group(p, coords=arr)
+            return {"kind": "cloud", "points": pts, "feature_names": names, **base}
+        if arr.ndim == 1 or (arr.ndim == 2 and arr.shape[1] == 1):
+            # a per-point scalar (e.g. 000000_intensity.npy) → pair with its coordinate cloud
+            coord = _coord_sibling(p)
+            if coord is None:
+                raise ValueError(
+                    f"{p.name} is a 1-D per-point array (shape {arr.shape}) with no coordinate "
+                    f"cloud beside it (expected a sibling '<base>.npy')")
+            pts, names = _cloud_group(coord)
+            return {"kind": "cloud", "points": pts, "feature_names": names, **base}
+        raise ValueError(f".npy shape {arr.shape} is neither an (N,>=3) cloud, a (N,) feature, "
+                         f"nor an (H,W,1/3/4) image")
     if ext in IMAGE_EXTS:
         return {"kind": "image", **base}   # raster file → streamed raw to the browser
     if ext in CLOUD_EXTS:                  # .bin, .pcd
-        return {"kind": "cloud", "points": _load_cloud(p, ext), **base}
+        pts, names = _cloud_group(p)
+        return {"kind": "cloud", "points": pts, "feature_names": names, **base}
     raise ValueError(f"unsupported format: {ext or p.name}")
+
+
+def _feature_siblings(base_path: Path) -> list[tuple[str, Path]]:
+    """`(feature_name, path)` for `<base>_<suffix>.npy` files beside the coordinate cloud."""
+    stem = base_path.stem
+    out = []
+    for p in sorted(base_path.parent.glob(f"{stem}_*.npy")):
+        suffix = p.stem[len(stem) + 1:]
+        if suffix:
+            out.append((suffix, p))
+    return out
+
+
+def _coord_sibling(scalar_path: Path) -> Path | None:
+    """`<base>_<suffix>.npy` → the coordinate cloud `<base>.<ext>` beside it, if any.
+
+    `<base>` is the stem up to the first `_` (frame stems carry no `_`, per the convention)."""
+    stem = scalar_path.stem
+    if "_" not in stem:
+        return None
+    base = stem.split("_", 1)[0]
+    for ext in (".npy", ".bin", ".pcd"):
+        cand = scalar_path.with_name(base + ext)
+        if cand != scalar_path and cand.is_file():
+            return cand
+    return None
+
+
+def _cloud_group(base_path: Path, coords: np.ndarray | None = None) -> tuple[np.ndarray, list[str]]:
+    """Load a coordinate cloud plus its sibling scalar features into `(N, 3+F)` float32.
+
+    Features: a native 4th column (as `intensity`) and every `<base>_<suffix>.npy` sibling of
+    matching length (a sibling `intensity` overrides the native one). Returns the array and
+    the ordered `feature_names` (aligned with columns 3..). No sibling → a plain `(N, 3)`.
+    """
+    if coords is None:
+        coords = _load_cloud(base_path, base_path.suffix.lower())
+    coords = np.asarray(coords)
+    n = len(coords)
+
+    feats: dict[str, np.ndarray] = {}
+    if coords.ndim == 2 and coords.shape[1] >= 4:
+        feats["intensity"] = coords[:, 3].astype(np.float32)   # KITTI-style x,y,z,intensity
+    for name, sp in _feature_siblings(base_path):
+        try:
+            arr = np.asarray(np.load(sp)).reshape(-1)
+        except (OSError, ValueError):
+            continue
+        if arr.shape[0] == n:
+            feats[name] = arr.astype(np.float32)               # sibling wins over native
+
+    names = ordered_features(feats.keys())
+    out = np.empty((n, 3 + len(names)), np.float32)
+    out[:, :3] = coords[:, :3]
+    for i, name in enumerate(names):
+        out[:, 3 + i] = feats[name]
+    return out, names
 
 
 def combine_clouds(clouds: list[np.ndarray]) -> np.ndarray:

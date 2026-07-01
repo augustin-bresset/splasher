@@ -198,7 +198,8 @@ def create_app(session_or_source, *, labels=None):
             raise HTTPException(422, str(e)) from e
         if res["kind"] == "cloud":
             return {"kind": "cloud", "name": res["name"], "path": res["path"],
-                    "points": encode_array(res["points"])}
+                    "points": encode_array(res["points"]),
+                    "feature_names": res.get("feature_names", [])}
         out = {"kind": "image", "name": res["name"], "path": res["path"]}
         if "image" in res:                 # a numpy image array (e.g. .npy HxWxC)
             out["image"] = encode_array(res["image"])

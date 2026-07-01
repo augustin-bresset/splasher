@@ -27,6 +27,7 @@ class SessionInfo:
     cloud_keys: list[str]
     image_keys: list[str]
     pose_key: str | None
+    feature_names: list[str] = field(default_factory=list)  # per-point scalars to color by (cols 3..)
 
     @property
     def has_pose(self) -> bool:

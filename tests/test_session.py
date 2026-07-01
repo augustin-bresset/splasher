@@ -23,6 +23,32 @@ def test_info_describes_demo_channels(session: Session) -> None:
     assert info.has_pose
 
 
+def test_sibling_scalar_channels_become_features() -> None:
+    """`(N,)` per-point scalars stored as `<cloud>_<suffix>` (apairo's suffixed sub-channels,
+    e.g. Tartan `*_intensity.npy`) become named feature columns the views can color by."""
+    from splasher import ArraySource, ChannelKind, ChannelSpec
+
+    specs = [
+        ChannelSpec("velodyne_0", ChannelKind.POINTCLOUD, np.dtype("float32"), (None, 3)),
+        ChannelSpec("velodyne_0_intensity", ChannelKind.SCALAR, np.dtype("uint8"), (None,)),
+        ChannelSpec("velodyne_0_range", ChannelKind.SCALAR, np.dtype("float32"), (None,)),
+    ]
+    xyz = np.random.rand(8, 3).astype(np.float32)
+    inten = np.arange(8, dtype=np.uint8)
+    rng = np.linspace(0.0, 1.0, 8, dtype=np.float32)
+    src = ArraySource(specs, [{"velodyne_0": xyz, "velodyne_0_intensity": inten,
+                               "velodyne_0_range": rng}])
+
+    session = Session(src)
+    assert session.info().feature_names == ["intensity", "range"]  # intensity first, then alpha
+    assert session.cloud_keys == ["velodyne_0"]           # the scalars are not cloud channels
+
+    v = session.view_state()
+    assert v.points.shape == (8, 5)                        # [x, y, z, intensity, range]
+    np.testing.assert_allclose(v.points[:, 3], inten)
+    np.testing.assert_allclose(v.points[:, 4], rng)
+
+
 def test_view_state_shapes_are_aligned(session: Session) -> None:
     v = session.view_state()
     assert v.points.ndim == 2 and v.points.shape[1] >= 3

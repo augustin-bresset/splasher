@@ -72,13 +72,13 @@ export class PanelManager {
     close.textContent = "✕";
     close.title = "Close view";
 
-    // 3D panels also get a "color by" selector (height / intensity).
+    // 3D panels also get a "color by" selector (height + each per-point feature, if any).
     let colorSel = null;
     if (type === "cloud") {
       colorSel = document.createElement("select");
       colorSel.className = "color-sel";
       colorSel.title = "Color by";
-      this._fillSelect(colorSel, [["height", "Height"], ["intensity", "Intensity"]]);
+      this._fillSelect(colorSel, this._colorOpts(this.session.feature_names));
     }
     head.append(tag, sel, ...(colorSel ? [colorSel] : []), close);
 
@@ -97,7 +97,7 @@ export class PanelManager {
       if (this._bg) panel.view.setBackground(this._bg);
       panel.view.setChannel(panel.channel);
       panel.view.setSensors(this.sensors);
-      colorSel.onchange = () => panel.view.setColorBy(colorSel.value);
+      colorSel.onchange = () => panel.view.setColorBy(this._parseColorBy(colorSel.value));
     } else {
       this._fillSelect(sel, this.session.image_keys.map((k) => [k, pretty(k)]));
       if (panel.channel === null) panel.channel = this.session.image_keys[0];
@@ -162,14 +162,14 @@ export class PanelManager {
     if (isCloud) {
       const colorSel = document.createElement("select");
       colorSel.className = "color-sel"; colorSel.title = "Color by";
-      this._fillSelect(colorSel, [["height", "Height"], ["intensity", "Intensity"]]);
+      this._fillSelect(colorSel, this._colorOpts(spec.feature_names));
       head.append(tag, name, colorSel, close);
       panel.view = new CloudView(body);
       panel.view.setPalette(this.palette);
       if (this._bg) panel.view.setBackground(this._bg);
       panel.view.setSensors([]);
       panel.view.setRawCloud(spec.points);
-      colorSel.onchange = () => panel.view.setColorBy(colorSel.value);
+      colorSel.onchange = () => panel.view.setColorBy(this._parseColorBy(colorSel.value));
     } else if (spec.image) {
       // numpy image array (e.g. .npy HxWxC) → draw on a canvas
       head.append(tag, name, close);
@@ -235,5 +235,16 @@ export class PanelManager {
       o.value = value; o.textContent = label;
       sel.appendChild(o);
     }
+  }
+
+  // "Color by" options: height + one entry per per-point feature (value = its column index).
+  _colorOpts(featureNames) {
+    const opts = [["height", "Height"]];
+    (featureNames || []).forEach((n, i) => opts.push([String(i), pretty(n)]));
+    return opts;
+  }
+
+  _parseColorBy(value) {
+    return value === "height" ? "height" : +value;   // feature index → CloudView column offset
   }
 }
