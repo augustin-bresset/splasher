@@ -10,6 +10,12 @@ the same `<cloud>_<suffix>` convention apairo uses for suffixed sub-channels (e.
 coordinate cloud plus every sibling feature as trailing named columns (`feature_names`), so
 the viewer can color by any of them. A native 4th column is surfaced as `intensity`.
 
+Measures living *anywhere else* (labels, intensity… — e.g. `ground_truth/00123.npy` for the
+cloud `00123.npy`) can be attached explicitly: `open_file(cloud, features=[...])` merges the
+given per-point files into the group (see `_extra_feature_name` for how they are named).
+Opening a lone per-point file with no coordinate sibling returns `kind="feature"` so a front
+can offer to attach it to an already-open cloud of matching length.
+
 Local use only (the server binds to 127.0.0.1).
 """
 
@@ -50,17 +56,20 @@ def _is_dir(p: Path) -> bool:
         return False
 
 
-def open_file(path: str) -> dict:
+def open_file(path: str, features: list[str] | None = None) -> dict:
     """Open a file.
 
     Returns one of:
     - `{kind:"cloud", points: (N,3+F) ndarray, feature_names: [...]}`,
+    - `{kind:"feature", length: N}`  (a per-point measure with no coordinate cloud beside it —
+      the caller may attach it to an open cloud of length N via `features`),
     - `{kind:"image", image: (H,W,C) ndarray}`  (decoded array, e.g. a `.npy` image),
     - `{kind:"image"}`  (raster file like .png/.jpg — streamed raw, decoded by the browser).
 
     A cloud's `points` are `[x, y, z, *feature_names]`: the trailing columns are per-point
     scalar features gathered from sibling `<base>_<suffix>.npy` files (and a native 4th
-    column, as `intensity`). See `_cloud_group`.
+    column, as `intensity`), plus the `features` files attached explicitly (per-point measures
+    living anywhere, e.g. `ground_truth/00123.npy`). See `_cloud_group`.
     """
     p = Path(path).expanduser()
     if not p.is_file():
@@ -73,23 +82,22 @@ def open_file(path: str) -> dict:
         if arr.ndim == 3 and arr.shape[2] in (1, 3, 4):
             return {"kind": "image", "image": arr, **base}
         if arr.ndim == 2 and arr.shape[1] >= 3:
-            pts, names = _cloud_group(p, coords=arr)
+            pts, names = _cloud_group(p, coords=arr, extra=features)
             return {"kind": "cloud", "points": pts, "feature_names": names, **base}
         if arr.ndim == 1 or (arr.ndim == 2 and arr.shape[1] == 1):
             # a per-point scalar (e.g. 000000_intensity.npy) → pair with its coordinate cloud
             coord = _coord_sibling(p)
             if coord is None:
-                raise ValueError(
-                    f"{p.name} is a 1-D per-point array (shape {arr.shape}) with no coordinate "
-                    f"cloud beside it (expected a sibling '<base>.npy')")
-            pts, names = _cloud_group(coord)
+                # no sibling: a standalone measure — attachable to an open cloud of that length
+                return {"kind": "feature", "length": int(arr.reshape(-1).shape[0]), **base}
+            pts, names = _cloud_group(coord, extra=features)
             return {"kind": "cloud", "points": pts, "feature_names": names, **base}
         raise ValueError(f".npy shape {arr.shape} is neither an (N,>=3) cloud, a (N,) feature, "
                          f"nor an (H,W,1/3/4) image")
     if ext in IMAGE_EXTS:
         return {"kind": "image", **base}   # raster file → streamed raw to the browser
     if ext in CLOUD_EXTS:                  # .bin, .pcd
-        pts, names = _cloud_group(p)
+        pts, names = _cloud_group(p, extra=features)
         return {"kind": "cloud", "points": pts, "feature_names": names, **base}
     raise ValueError(f"unsupported format: {ext or p.name}")
 
@@ -120,12 +128,46 @@ def _coord_sibling(scalar_path: Path) -> Path | None:
     return None
 
 
-def _cloud_group(base_path: Path, coords: np.ndarray | None = None) -> tuple[np.ndarray, list[str]]:
+def _extra_feature_name(base_path: Path, feature_path: Path) -> str:
+    """Feature name for an explicitly attached measure file.
+
+    `<cloudstem>_<suffix>` → the suffix (sibling convention, wherever the file lives); the
+    same stem as the cloud (e.g. `ground_truth/00123.npy` on `00123.npy`) → the holding
+    directory's name; anything else → the file's stem.
+    """
+    stem, base = feature_path.stem, base_path.stem
+    if stem.startswith(base + "_") and len(stem) > len(base) + 1:
+        return stem[len(base) + 1:]
+    if stem == base:
+        return feature_path.parent.name or stem
+    return stem
+
+
+def _load_extra_feature(fp: Path, n: int) -> np.ndarray:
+    """Load an explicitly attached per-point measure: `(n,)` or `(n,1)` .npy → `(n,) float32`.
+
+    Unlike siblings (best-effort, skipped on mismatch), an explicit attach fails loudly."""
+    if fp.suffix.lower() != ".npy":
+        raise ValueError(f"{fp.name}: per-point measures must be .npy files")
+    arr = np.asarray(np.load(fp))
+    if not (arr.ndim == 1 or (arr.ndim == 2 and arr.shape[1] == 1)):
+        raise ValueError(f"{fp.name}: expected an (N,) or (N,1) per-point array, "
+                         f"got shape {arr.shape}")
+    vals = arr.reshape(-1)
+    if vals.shape[0] != n:
+        raise ValueError(f"{fp.name}: {vals.shape[0]} values for a {n}-point cloud")
+    return vals.astype(np.float32)
+
+
+def _cloud_group(base_path: Path, coords: np.ndarray | None = None,
+                 extra: list[str] | None = None) -> tuple[np.ndarray, list[str]]:
     """Load a coordinate cloud plus its sibling scalar features into `(N, 3+F)` float32.
 
     Features: a native 4th column (as `intensity`) and every `<base>_<suffix>.npy` sibling of
-    matching length (a sibling `intensity` overrides the native one). Returns the array and
-    the ordered `feature_names` (aligned with columns 3..). No sibling → a plain `(N, 3)`.
+    matching length (a sibling `intensity` overrides the native one), then the `extra` files
+    (explicitly attached measures — any location, named by `_extra_feature_name`, they win
+    over both). Returns the array and the ordered `feature_names` (aligned with columns 3..).
+    No feature → a plain `(N, 3)`.
     """
     if coords is None:
         coords = _load_cloud(base_path, base_path.suffix.lower())
@@ -142,6 +184,9 @@ def _cloud_group(base_path: Path, coords: np.ndarray | None = None) -> tuple[np.
             continue
         if arr.shape[0] == n:
             feats[name] = arr.astype(np.float32)               # sibling wins over native
+    for fpath in extra or ():
+        fp = Path(fpath).expanduser()
+        feats[_extra_feature_name(base_path, fp)] = _load_extra_feature(fp, n)
 
     names = ordered_features(feats.keys())
     out = np.empty((n, 3 + len(names)), np.float32)
@@ -151,18 +196,24 @@ def _cloud_group(base_path: Path, coords: np.ndarray | None = None) -> tuple[np.
     return out, names
 
 
-def combine_clouds(clouds: list[np.ndarray]) -> np.ndarray:
-    """Concatenate clouds into a single `(M, 4)` array [x, y, z, intensity] (0 if absent)."""
-    total = sum(len(c) for c in clouds)
-    out = np.zeros((total, 4), dtype=np.float32)
+def combine_clouds(clouds: list[tuple[np.ndarray, list[str]]]) -> tuple[np.ndarray, list[str]]:
+    """Concatenate `(points, feature_names)` clouds into one `(M, 3+F)` float32 array.
+
+    `F` = the union of the feature names (ordered by `ordered_features`); each cloud fills
+    the features it has, `NaN` elsewhere (the NaN-excluding convention of the BEV mean).
+    """
+    names = ordered_features({n for _, ns in clouds for n in ns})
+    total = sum(len(c) for c, _ in clouds)
+    col = {name: 3 + i for i, name in enumerate(names)}
+    out = np.full((total, 3 + len(names)), np.nan, dtype=np.float32)
     k = 0
-    for c in clouds:
+    for c, ns in clouds:
         n = len(c)
         out[k:k + n, :3] = c[:, :3]
-        if c.shape[1] >= 4:
-            out[k:k + n, 3] = c[:, 3]
+        for i, name in enumerate(ns):
+            out[k:k + n, col[name]] = c[:, 3 + i]
         k += n
-    return out
+    return out, names
 
 
 def _load_cloud(p: Path, ext: str) -> np.ndarray:

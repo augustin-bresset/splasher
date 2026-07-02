@@ -183,13 +183,14 @@ function pickClouds() {
   return [...$("clouds").querySelectorAll("input[data-name]:checked")].map((cb) => cb.dataset.name);
 }
 
-// File-viewer: send the checked open clouds as the (labelable) session source.
+// File-viewer: send the checked open clouds (with their attached measures) as the
+// (labelable) session source.
 async function updateSourceFromClouds() {
-  const paths = [...$("clouds").querySelectorAll("input[data-path]:checked")].map((cb) => cb.dataset.path);
-  const clouds = manager.openClouds();
-  const first = clouds.find((c) => paths.includes(c.path));
+  const checked = new Set([...$("clouds").querySelectorAll("input[data-path]:checked")].map((cb) => cb.dataset.path));
+  const clouds = manager.openClouds().filter((c) => checked.has(c.path));
+  const first = clouds[0];
   if (first) $("export-name").value = first.name.replace(/\.[^.]+$/, "") + "_bev.npy";
-  await run(api.cmd("/api/source/files", { paths }));
+  await run(api.cmd("/api/source/files", { paths: clouds.map((c) => ({ path: c.path, features: c.features })) }));
   session = await api.session();   // the combined source's feature list may have changed
   buildBevModes();
 }
@@ -208,7 +209,7 @@ function saveWorkspace() {
   try {
     const grow = (sel) => parseFloat(getComputedStyle(document.querySelector(sel)).flexGrow) || 1;
     localStorage.setItem(WS_KEY, JSON.stringify({
-      files: manager.openFiles().map((f) => f.path),
+      files: manager.openFiles().map((f) => ({ path: f.path, features: f.features || [] })),
       dir: fsPath,
       layout: {
         rail: document.querySelector(".rail").getBoundingClientRect().width,
@@ -230,8 +231,11 @@ async function restoreWorkspace() {
   }
   if (fileMode && ws.files && ws.files.length) {
     const cb = manager.onFiles; manager.onFiles = null;        // bulk: refresh once at the end
-    for (const path of ws.files) {
-      try { manager.addFile(await api.fsOpen(path)); } catch { /* file gone/changed */ }
+    for (const item of ws.files) {                             // legacy entries are plain paths
+      const path = typeof item === "string" ? item : item.path;
+      const features = (typeof item === "string" ? null : item.features) || [];
+      try { manager.addFile(await api.fsOpen(path, features), features); }
+      catch { /* file gone/changed */ }
     }
     manager.onFiles = cb;
     onFilesChanged();
@@ -393,6 +397,10 @@ function renderOpenViews() {
     const tag = document.createElement("span");
     tag.className = "fs-open-tag"; tag.textContent = f.type === "file-cloud" ? "3D" : "Img";
     const nm = document.createElement("span"); nm.className = "fs-open-name"; nm.textContent = f.name;
+    if (f.features && f.features.length) {     // attached per-point measures (short paths)
+      nm.textContent += ` (+${f.features.map((p) => p.split("/").slice(-2).join("/")).join(", ")})`;
+      nm.title = f.path + "\n+ " + f.features.join("\n+ ");
+    }
     const x = document.createElement("button");
     x.className = "icon-btn"; x.textContent = "✕"; x.title = "Close view";
     x.onclick = () => { manager.remove(f.id); renderOpenViews(); fsNavigate(fsPath); };
@@ -449,10 +457,34 @@ function fsEntry(e, open) {
 }
 async function openFile(path) {
   try {
-    manager.addFile(await api.fsOpen(path));   // triggers onFiles (clouds + source + open-list)
-    $("fs-error").textContent = "";
-    fsNavigate(fsPath);                        // refresh the "open" markers
+    const res = await api.fsOpen(path);
+    let msg = "";
+    if (res.kind === "feature") msg = await attachFeature(res);   // a lone per-point measure
+    else manager.addFile(res);                 // triggers onFiles (clouds + source + open-list)
+    await fsNavigate(fsPath);                  // refresh the "open" markers
+    $("fs-error").textContent = msg;
   } catch (e) { $("fs-error").textContent = "⚠ " + e.message; }
+}
+
+// A lone (N,) file (labels, intensity…) → attach it as a measure to the open cloud it
+// belongs to: same file stem first (e.g. ground_truth/00123.npy → 00123.npy), else the
+// only open cloud with N points. The cloud recolors by the new measure right away.
+async function attachFeature(res) {
+  const stem = (p) => p.split("/").pop().replace(/\.[^.]+$/, "");
+  const clouds = manager.openClouds().filter((c) => c.nPoints === res.length);
+  if (!clouds.length)
+    throw new Error(`${res.name} holds ${res.length} per-point values — no open cloud has that many points (open the cloud first)`);
+  const fstem = stem(res.path);
+  const byStem = clouds.filter((c) => fstem === stem(c.path) || fstem.startsWith(stem(c.path) + "_"));
+  const target = byStem[0] || (clouds.length === 1 ? clouds[0] : null);
+  if (!target)
+    throw new Error(`${res.length} points match several open clouds (${clouds.map((c) => c.name).join(", ")})`);
+  const features = target.features.includes(res.path) ? target.features : [...target.features, res.path];
+  const spec = await api.fsOpen(target.path, features);
+  const added = (spec.feature_names || []).find((n) => !(target.featureNames || []).includes(n));
+  manager.updateFileCloud(target.id, spec, features, added || null);
+  const short = res.path.split("/").slice(-2).join("/");   // disambiguate same-name files
+  return `✓ ${short} attached to ${target.name}`;
 }
 
 // ------------------------------------------------------------- class editor

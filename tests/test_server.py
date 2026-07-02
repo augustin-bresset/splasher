@@ -129,9 +129,94 @@ def test_open_file_gathers_sibling_features(tmp_path) -> None:
     assert res2["name"] == "000000_intensity.npy"         # the panel keeps the opened file's name
 
 
-def test_open_file_lone_scalar_without_coords_errors(tmp_path) -> None:
+def test_open_file_lone_scalar_without_coords_is_a_feature(tmp_path) -> None:
+    """A per-point file with no coordinate sibling is returned as an attachable measure."""
     from splasher.server.files import open_file
 
     np.save(tmp_path / "lonely_intensity.npy", np.arange(4, dtype=np.uint8))
-    with pytest.raises(ValueError, match="no coordinate cloud"):
-        open_file(str(tmp_path / "lonely_intensity.npy"))
+    res = open_file(str(tmp_path / "lonely_intensity.npy"))
+    assert res["kind"] == "feature" and res["length"] == 4
+
+
+def test_open_file_attaches_explicit_measures(tmp_path) -> None:
+    """`features=[...]` merges per-point measure files living anywhere into the cloud.
+
+    Naming: `<cloudstem>_<suffix>` → suffix; same stem in another dir → that dir's name."""
+    from splasher.server.files import open_file
+
+    xyz = np.random.rand(6, 3).astype(np.float32)
+    labels = np.array([0, 1, 0, 1, 1, 0], dtype=np.uint8)
+    np.save(tmp_path / "00123.npy", xyz)
+    (tmp_path / "ground_truth").mkdir()
+    np.save(tmp_path / "ground_truth" / "00123.npy", labels)          # same stem, other dir
+    np.save(tmp_path / "elsewhere_intensity.npy", np.arange(6, dtype=np.float32))
+
+    res = open_file(str(tmp_path / "00123.npy"),
+                    features=[str(tmp_path / "ground_truth" / "00123.npy")])
+    assert res["kind"] == "cloud" and res["feature_names"] == ["ground_truth"]
+    assert res["points"].shape == (6, 4)
+    np.testing.assert_allclose(res["points"][:, 3], labels)
+
+    res2 = open_file(str(tmp_path / "00123.npy"),
+                     features=[str(tmp_path / "ground_truth" / "00123.npy"),
+                               str(tmp_path / "elsewhere_intensity.npy")])
+    assert res2["feature_names"] == ["elsewhere_intensity", "ground_truth"]
+
+    # length mismatch fails loudly (an explicit attach is a user action)
+    np.save(tmp_path / "short.npy", np.arange(3, dtype=np.float32))
+    with pytest.raises(ValueError, match="3 values for a 6-point cloud"):
+        open_file(str(tmp_path / "00123.npy"), features=[str(tmp_path / "short.npy")])
+
+
+def test_extra_feature_name_uses_suffix_when_stem_matches(tmp_path) -> None:
+    from splasher.server.files import _extra_feature_name
+
+    cloud = tmp_path / "00123.npy"
+    assert _extra_feature_name(cloud, tmp_path / "00123_labels.npy") == "labels"
+    assert _extra_feature_name(cloud, tmp_path / "ground_truth" / "00123.npy") == "ground_truth"
+    assert _extra_feature_name(cloud, tmp_path / "semantics.npy") == "semantics"
+
+
+def test_combine_clouds_unions_named_features() -> None:
+    from splasher.server.files import combine_clouds
+
+    a = np.hstack([np.random.rand(4, 3), np.arange(4).reshape(-1, 1)]).astype(np.float32)
+    b = np.hstack([np.random.rand(2, 3), np.ones((2, 1))]).astype(np.float32)
+    pts, names = combine_clouds([(a, ["labels"]), (b, ["intensity"])])
+    assert names == ["intensity", "labels"] and pts.shape == (6, 5)
+    np.testing.assert_allclose(pts[:4, 4], np.arange(4))   # a's labels
+    assert np.isnan(pts[:4, 3]).all()                      # a has no intensity
+    np.testing.assert_allclose(pts[4:, 3], 1.0)            # b's intensity
+    assert np.isnan(pts[4:, 4]).all()                      # b has no labels
+
+
+def test_api_attach_measure_and_bev_feature(tmp_path) -> None:
+    """End to end: open a cloud, open a lone measure (kind=feature), re-open the cloud with
+    it attached, and use it as the BEV underlay of the combined source."""
+    from splasher import ArraySource
+
+    c = TestClient(create_app(ArraySource([], [])))
+    xyz = np.random.rand(10, 3).astype(np.float32)
+    labels = (np.arange(10) % 2).astype(np.uint8)
+    np.save(tmp_path / "00123.npy", xyz)
+    (tmp_path / "ground_truth").mkdir()
+    np.save(tmp_path / "ground_truth" / "00123.npy", labels)
+
+    lone = c.post("/api/fs/open", json={"path": str(tmp_path / "ground_truth" / "00123.npy")}).json()
+    assert lone["kind"] == "feature" and lone["length"] == 10
+
+    merged = c.post("/api/fs/open", json={
+        "path": str(tmp_path / "00123.npy"),
+        "features": [str(tmp_path / "ground_truth" / "00123.npy")]}).json()
+    assert merged["kind"] == "cloud" and merged["feature_names"] == ["ground_truth"]
+    assert decode_array(merged["points"]).shape == (10, 4)
+
+    src = c.post("/api/source/files", json={"paths": [
+        {"path": str(tmp_path / "00123.npy"),
+         "features": [str(tmp_path / "ground_truth" / "00123.npy")]}]}).json()
+    assert decode_array(src["points"]).shape == (10, 4)
+    assert c.get("/api/session").json()["feature_names"] == ["ground_truth"]
+
+    d = c.post("/api/bev_mode", json={"mode": "ground_truth"}).json()
+    assert d["bev_mode"] == "ground_truth"
+    assert decode_array(d["bev_field"]) is not None

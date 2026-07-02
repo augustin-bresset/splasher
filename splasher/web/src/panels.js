@@ -44,14 +44,21 @@ export class PanelManager {
     return [...new Set(this.panels.filter((p) => p.type === "cam").map((p) => p.channel))];
   }
 
-  // Paths of files currently open in views (to flag them in the file browser).
+  // Paths of files currently open in views — including attached measure files — to flag
+  // them in the file browser.
   openFilePaths() {
-    return new Set(this.panels.filter((p) => p.path).map((p) => p.path));
+    const out = new Set();
+    for (const p of this.panels) {
+      if (p.path) out.add(p.path);
+      for (const f of p.features || []) out.add(f);
+    }
+    return out;
   }
 
-  // File views currently open (for the browser's "Open views" side list).
+  // File views currently open (for the browser's "Open views" side list + workspace).
   openFiles() {
-    return this.panels.filter((p) => p.path).map((p) => ({ id: p.id, name: p.name, path: p.path, type: p.type }));
+    return this.panels.filter((p) => p.path)
+      .map((p) => ({ id: p.id, name: p.name, path: p.path, type: p.type, features: p.features || [] }));
   }
 
   add(spec, silent = false) {
@@ -140,7 +147,8 @@ export class PanelManager {
   }
 
   // Add a standalone view from an opened file (file viewer): not tied to the dataset.
-  addFile(spec) {
+  // `features`: measure files attached to the cloud (already merged into spec.points).
+  addFile(spec, features = []) {
     const id = ++this._seq;
     const isCloud = spec.kind === "cloud";
     const el = document.createElement("section");
@@ -160,9 +168,13 @@ export class PanelManager {
                     name: spec.name, path: spec.path };
 
     if (isCloud) {
+      panel.features = features;
+      panel.featureNames = spec.feature_names || [];
+      panel.nPoints = spec.points ? spec.points.shape[0] : 0;
       const colorSel = document.createElement("select");
       colorSel.className = "color-sel"; colorSel.title = "Color by";
       this._fillSelect(colorSel, this._colorOpts(spec.feature_names));
+      panel.colorSel = colorSel;
       head.append(tag, name, colorSel, close);
       panel.view = new CloudView(body);
       panel.view.setPalette(this.palette);
@@ -196,9 +208,31 @@ export class PanelManager {
     return panel;
   }
 
-  // Open cloud views (for the "Clouds (BEV)" selector → session source).
+  // Replace an open file-cloud's data (e.g. after attaching a per-point measure file):
+  // same panel, same camera; refreshed columns + "color by" options. `colorBy` (a feature
+  // name) selects the coloring — e.g. the freshly attached measure.
+  updateFileCloud(id, spec, features, colorBy = null) {
+    const p = this.panels.find((q) => q.id === id);
+    if (!p || p.type !== "file-cloud") return;
+    const prev = p.colorSel.value === "height" ? "height" : (p.featureNames || [])[+p.colorSel.value];
+    p.features = features;
+    p.featureNames = spec.feature_names || [];
+    p.nPoints = spec.points ? spec.points.shape[0] : 0;
+    this._fillSelect(p.colorSel, this._colorOpts(p.featureNames));
+    const want = colorBy && p.featureNames.includes(colorBy) ? colorBy : prev;
+    const idx = p.featureNames.indexOf(want);
+    p.colorSel.value = idx >= 0 ? String(idx) : "height";
+    p.view.setColorBy(this._parseColorBy(p.colorSel.value));
+    p.view.setRawCloud(spec.points, false);
+    if (this.onFiles) this.onFiles();
+  }
+
+  // Open cloud views (for the "Clouds (BEV)" selector → session source, and to match a
+  // lone measure file to a cloud by point count).
   openClouds() {
-    return this.panels.filter((p) => p.type === "file-cloud").map((p) => ({ id: p.id, name: p.name, path: p.path }));
+    return this.panels.filter((p) => p.type === "file-cloud")
+      .map((p) => ({ id: p.id, name: p.name, path: p.path, features: p.features || [],
+                     featureNames: p.featureNames || [], nPoints: p.nPoints }));
   }
 
   update(view) {

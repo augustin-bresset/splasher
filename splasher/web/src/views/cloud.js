@@ -128,8 +128,13 @@ export class CloudView {
   setColorBy(mode) { this.colorBy = mode; this._rebuild(); }
   setView(view) { this.view = view; this._rebuild(); }
 
-  // Render a standalone point cloud (file viewer): no labels/channels, re-fit the camera.
-  setRawCloud(points) { this._framed = false; this.view = { points }; this._rebuild(); }
+  // Render a standalone point cloud (file viewer): no labels/channels. `refit=false` keeps
+  // the camera (e.g. attaching a measure to an already-framed cloud).
+  setRawCloud(points, refit = true) {
+    if (refit) this._framed = false;
+    this.view = { points };
+    this._rebuild();
+  }
 
   _rebuild() {
     const p = this.view && this.view.points;

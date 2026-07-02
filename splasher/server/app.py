@@ -193,13 +193,18 @@ def create_app(session_or_source, *, labels=None):
     @app.post("/api/fs/open")
     def fs_open(payload: dict = Body(...)) -> dict:
         try:
-            res = open_file(payload["path"])
+            res = open_file(payload["path"], features=payload.get("features"))
         except (FileNotFoundError, ValueError, OSError) as e:
             raise HTTPException(422, str(e)) from e
         if res["kind"] == "cloud":
             return {"kind": "cloud", "name": res["name"], "path": res["path"],
                     "points": encode_array(res["points"]),
                     "feature_names": res.get("feature_names", [])}
+        if res["kind"] == "feature":
+            # a lone per-point measure — the front may attach it to an open cloud of
+            # matching length (re-opening the cloud with `features=[this path]`)
+            return {"kind": "feature", "name": res["name"], "path": res["path"],
+                    "length": res["length"]}
         out = {"kind": "image", "name": res["name"], "path": res["path"]}
         if "image" in res:                 # a numpy image array (e.g. .npy HxWxC)
             out["image"] = encode_array(res["image"])
@@ -216,23 +221,39 @@ def create_app(session_or_source, *, labels=None):
     def set_source_files(payload: dict = Body(...)) -> dict:
         """File-viewer: make the selected cloud files the (labelable) session source.
 
-        Combines them into one frame so the BEV grid + labeling work on the loaded cloud(s).
+        `paths` entries are either a plain path or `{path, features: [paths]}` (explicitly
+        attached per-point measures). Combines everything into one frame so the BEV grid +
+        labeling work on the loaded cloud(s); each feature becomes a `lidar_<name>` scalar
+        channel, so the BEV underlay can color by it.
         """
-        clouds = []
-        for path in payload.get("paths", []):
-            try:
-                res = open_file(path)
-            except (FileNotFoundError, ValueError, OSError):
+        clouds: list[tuple] = []
+        for entry in payload.get("paths", []):
+            path = entry if isinstance(entry, str) else entry.get("path")
+            feats = None if isinstance(entry, str) else entry.get("features")
+            if not path:
                 continue
+            try:
+                res = open_file(path, features=feats)
+            except (FileNotFoundError, ValueError, OSError):
+                if not feats:
+                    continue
+                try:
+                    res = open_file(path)   # a measure file went bad → keep the bare cloud
+                except (FileNotFoundError, ValueError, OSError):
+                    continue
             if res.get("kind") == "cloud":
-                clouds.append(res["points"])
+                clouds.append((res["points"], res["feature_names"]))
         keep = session.grid_labelled_count() > 0   # once you've labeled, the grid is locked
         if not clouds:
             session.set_source(ArraySource([], []), keep_grid=keep)
             return view()
-        pts = combine_clouds(clouds)
-        spec = ChannelSpec("lidar", ChannelKind.POINTCLOUD, pts.dtype, (None, pts.shape[1]))
-        session.set_source(ArraySource([spec], [{"lidar": pts}]), keep_grid=keep)
+        pts, names = combine_clouds(clouds)
+        channels = {"lidar": pts[:, :3]}
+        specs = [ChannelSpec("lidar", ChannelKind.POINTCLOUD, pts.dtype, (None, 3))]
+        for i, name in enumerate(names):   # features → sibling scalar channels (BEV-colorable)
+            channels[f"lidar_{name}"] = pts[:, 3 + i]
+            specs.append(ChannelSpec(f"lidar_{name}", ChannelKind.SCALAR, pts.dtype, (None,)))
+        session.set_source(ArraySource(specs, [channels]), keep_grid=keep)
         return view()
 
     # Web front mounted last (on "/"): the /api/* and /docs routes, registered before,

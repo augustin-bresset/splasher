@@ -80,9 +80,11 @@ export const api = {
     if (!r.ok) throw new Error(d.detail || `list failed (${r.status})`);
     return d;
   },
-  fsOpen: async (path) => {
+  // `features`: per-point measure files (any location) to attach to the opened cloud.
+  fsOpen: async (path, features = []) => {
     const r = await fetch("/api/fs/open", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path }),
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(features.length ? { path, features } : { path }),
     });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(d.detail || `open failed (${r.status})`);
