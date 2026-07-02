@@ -64,8 +64,9 @@ export class CloudView {
     this.view = null;
     this.channel = null;            // null = all channels, otherwise a cloud_keys index
     this.colorBy = "height";        // "height" (z) | feature index i (column 3+i, if present)
-    this.running = true;
     this._framed = false;           // auto-fit the camera on the first non-empty cloud
+    this._raf = null;               // pending on-demand render, or null (idle = zero GPU work)
+    this._disposed = false;
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x07090c);
@@ -80,6 +81,7 @@ export class CloudView {
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = false;   // no inertia: the camera stops as soon as you do
+    this.controls.addEventListener("change", () => this._invalidate());
 
     const grid = new THREE.GridHelper(200, 40, 0x2a2a30, 0x18181d);
     grid.rotation.x = Math.PI / 2;
@@ -104,16 +106,16 @@ export class CloudView {
     this._ro = new ResizeObserver(() => this._resize());
     this._ro.observe(container);
     this._resize();
-    this._loop();
+    this._invalidate();
   }
 
   setPalette(p) { this.palette = p; }
-  setBackground(css) { this.scene.background = new THREE.Color(css); }
+  setBackground(css) { this.scene.background = new THREE.Color(css); this._invalidate(); }
   setChannel(ch) { this.channel = ch; this._rebuild(); }
 
   // sensors: [{ name, kind, placement }] — placement is a 4x4 (nested) ego pose, or null.
   setSensors(sensors) {
-    this.sensorsGroup.clear();
+    this._clearSensors();
     for (const s of sensors || []) {
       const g = makeMarker(s);
       if (s.placement) {
@@ -124,6 +126,20 @@ export class CloudView {
       }
       this.sensorsGroup.add(g);
     }
+    this._invalidate();
+  }
+
+  // Free GPU resources held by the sensor markers (geometries, materials, label textures);
+  // `Group.clear()` alone would leak them on every setSensors call.
+  _clearSensors() {
+    this.sensorsGroup.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) {
+        if (o.material.map) o.material.map.dispose();
+        o.material.dispose();
+      }
+    });
+    this.sensorsGroup.clear();
   }
   setColorBy(mode) { this.colorBy = mode; this._rebuild(); }
   setView(view) { this.view = view; this._rebuild(); }
@@ -138,7 +154,7 @@ export class CloudView {
 
   _rebuild() {
     const p = this.view && this.view.points;
-    if (!p || p.shape[0] === 0) { this.geom.setDrawRange(0, 0); return; }
+    if (!p || p.shape[0] === 0) { this.geom.setDrawRange(0, 0); this._invalidate(); return; }
     const [n, stride] = p.shape;
     const labels = this.view.pointLabels ? this.view.pointLabels.data : null;
     const chans = this.view.pointChannels ? this.view.pointChannels.data : null;
@@ -177,11 +193,15 @@ export class CloudView {
       col[k * 3] = rgb[0] / 255; col[k * 3 + 1] = rgb[1] / 255; col[k * 3 + 2] = rgb[2] / 255;
       k++;
     }
+    // Release the previous attributes' GPU buffers: the renderer only frees them on a
+    // geometry `dispose` event, so replacing attributes without it leaks VRAM per rebuild.
+    this.geom.dispose();
     this.geom.setAttribute("position", new THREE.BufferAttribute(pos, 3));
     this.geom.setAttribute("color", new THREE.BufferAttribute(col, 3));
     this.geom.setDrawRange(0, k);
     this.geom.computeBoundingSphere();
     if (!this._framed && k > 0) { this._framed = true; this._fit(this.geom.boundingSphere); }
+    this._invalidate();
   }
 
   // Frame the camera on the cloud once, so points are visible wherever they sit in space.
@@ -203,19 +223,33 @@ export class CloudView {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    this._invalidate();
   }
 
-  _loop() {
-    if (!this.running) return;
-    requestAnimationFrame(() => this._loop());
-    this.controls.update();
-    this.renderer.render(this.scene, this.camera);
+  // On-demand rendering: draw once per dirty mark (camera change, data/appearance change,
+  // resize) instead of a continuous loop. An idle view does zero GPU work.
+  _invalidate() {
+    if (this._raf !== null || this._disposed) return;
+    this._raf = requestAnimationFrame(() => {
+      this._raf = null;
+      this.renderer.render(this.scene, this.camera);
+    });
   }
 
   dispose() {
-    this.running = false;
+    this._disposed = true;
+    if (this._raf !== null) { cancelAnimationFrame(this._raf); this._raf = null; }
     this._ro.disconnect();
-    this.geom.dispose();
+    this.controls.dispose();
+    this._clearSensors();
+    // Free everything this view put on the GPU (cloud geometry + material, grid, axes, labels).
+    this.scene.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) {
+        if (o.material.map) o.material.map.dispose();
+        o.material.dispose();
+      }
+    });
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
