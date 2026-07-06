@@ -19,6 +19,7 @@ let bev = null, manager = null, lut = null;
 let playTimer = null;
 let fsPath = null;        // current directory in the file browser
 let fileMode = false;     // empty launch → file-viewer mode (clouds = references, grid persists)
+let apairo = null;        // apairo dataset info (when the source is one), else {is_apairo:false}
 
 function currentTheme() {
   let t = null;
@@ -88,6 +89,7 @@ async function boot() {
   apply(first);
   fillGridForm(first.grid);
   updateDims(readGridForm());
+  await refreshApairo();                           // show the apairo block if the source is one
 
   await restoreWorkspace();                       // reopen views + restore layout from last session
   window.addEventListener("beforeunload", saveWorkspace);
@@ -277,6 +279,48 @@ function setupRanges() {
   if (!session.has_pose) $("accum-panel").style.opacity = 0.5;
 }
 
+// ------------------------------------------------- apairo write-back (optional)
+const APAIRO_HIST_KEY = "splasher-apairo-channels";
+const apairoHistory = () => {
+  try { return JSON.parse(localStorage.getItem(APAIRO_HIST_KEY) || "[]"); } catch { return []; }
+};
+function rememberApairoChannel(name) {
+  if (!name) return;
+  const hist = [name, ...apairoHistory().filter((n) => n !== name)].slice(0, 8);
+  try { localStorage.setItem(APAIRO_HIST_KEY, JSON.stringify(hist)); } catch { /* ignore */ }
+  fillApairoHistory();
+}
+function fillApairoHistory() {
+  const opt = (n) => { const o = document.createElement("option"); o.value = n; return o; };
+  $("apairo-channel-history").replaceChildren(...apairoHistory().map(opt));
+}
+
+// Show the apairo block (reference + mode + channel + sequence switch) if the source is one.
+async function refreshApairo() {
+  try { apairo = await api.apairoInfo(); } catch { apairo = { is_apairo: false }; }
+  const box = $("apairo-box");
+  if (!apairo.is_apairo) { box.hidden = true; return; }
+  box.hidden = false;
+  $("apairo-name").textContent = apairo.name || "";
+
+  const mkOpt = (v, t) => { const o = document.createElement("option"); o.value = v; o.textContent = t ?? v; return o; };
+  const seqRow = $("apairo-seq-row"), seqSel = $("apairo-seq");
+  if (apairo.sequences && apairo.sequences.length) {
+    seqRow.hidden = false;
+    seqSel.replaceChildren(mkOpt("__all__", "· all ·"), ...apairo.sequences.map((s) => mkOpt(s)));
+    seqSel.value = apairo.sequence || "__all__";
+  } else {
+    seqRow.hidden = true;
+  }
+
+  const refSel = $("apairo-ref");
+  refSel.replaceChildren(...(apairo.point_channels || []).map((c) => mkOpt(c)));
+  if (apairo.reference) refSel.value = apairo.reference;
+
+  if (!$("apairo-channel").value) $("apairo-channel").value = apairoHistory()[0] || "ground_truth";
+  fillApairoHistory();
+}
+
 // ------------------------------------------------------------- wiring
 function wireControls() {
   $("tool-select").onclick = () =>
@@ -342,6 +386,32 @@ function wireControls() {
     if (!dir) return ($("status").textContent = "⚠ enter an output folder");
     try { const r = await api.export(dir, name); $("status").textContent = "exported " + r.path; }
     catch (e) { $("status").textContent = "⚠ " + e.message; }
+  };
+
+  // apairo: switch sequence (resets labeling) and write labels back as a channel.
+  $("apairo-seq").onchange = async (e) => {
+    const seq = e.target.value;
+    if (!confirm("Switch sequence? This resets the current labeling.")) { await refreshApairo(); return; }
+    $("status").textContent = "opening sequence…";
+    try {
+      const v = await api.apairoSequence(seq);
+      session = await api.session();     // frame count changes across sequences
+      setupRanges();
+      fillGridForm(v.grid); apply(v); updateDims(readGridForm());
+      await refreshApairo();
+      $("status").textContent = "opened " + (seq === "__all__" ? "all sequences" : "sequence " + seq);
+    } catch (err) { $("status").textContent = "⚠ " + err.message; await refreshApairo(); }
+  };
+  $("btn-apairo-save").onclick = async () => {
+    const channel = $("apairo-channel").value.trim() || "ground_truth";
+    const reference = $("apairo-ref").value;
+    const mode = document.querySelector('input[name="apairo-mode"]:checked')?.value || "grid";
+    $("status").textContent = "writing apairo channel…";
+    try {
+      const r = await api.apairoSave(channel, reference, mode);
+      rememberApairoChannel(channel);
+      $("status").textContent = `wrote '${r.channel}' (${mode}) — ${r.frames} frame${r.frames === 1 ? "" : "s"}`;
+    } catch (e) { $("status").textContent = "⚠ apairo write failed: " + e.message; }
   };
 
   // Keyboard shortcuts — ignored while typing in a field.

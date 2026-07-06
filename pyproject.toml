@@ -23,7 +23,8 @@ dependencies = [
 # apairo is just ONE optional input adapter — the core does not depend on it.
 [project.optional-dependencies]
 apairo = [
-    "apairo @ git+https://github.com/apairo-robotics/apairo.git",
+    # Pinned: needs apairo.ChannelWriter (added after 0.4.0's first tag); older commits lack it.
+    "apairo @ git+https://github.com/apairo-robotics/apairo.git@f08e0772185032d1668269930ad788667ecc06b4",
     "PyYAML",
 ]
 # Web server + API (the `splasher.engine` core does not depend on it).

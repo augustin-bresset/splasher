@@ -248,6 +248,86 @@ class Session:
         self.point_target.load_labels(data["point_labels"])
         self.selection = None
 
+    # ============================================================== apairo
+    def apairo_meta(self) -> dict:
+        """Dataset/sequence/reference info when the source is an apairo dataset.
+
+        `{"is_apairo": False}` otherwise (the source exposes no `apairo_meta`), so a front
+        can hide the apairo controls. Duck-typed: the engine never hard-depends on apairo.
+        """
+        meta = getattr(self.source, "apairo_meta", None)
+        return meta() if callable(meta) else {"is_apairo": False}
+
+    def open_apairo_sequence(self, sequence: str | None) -> None:
+        """Load another sequence of the apairo dataset (resets grid + labels).
+
+        A falsy `sequence` (or `"__all__"`) loads the whole dataset as a flat timeline.
+        """
+        if not self.apairo_meta().get("is_apairo"):
+            raise ValueError("the current source is not an apairo dataset")
+        for_sequence = getattr(self.source, "for_sequence", None)
+        if not callable(for_sequence):
+            raise ValueError("this source does not support sequence switching")
+        self.set_source(for_sequence(sequence or None if sequence != "__all__" else None))
+
+    def save_apairo(self, channel: str = "ground_truth", reference: str | None = None,
+                    mode: str = "grid") -> dict:
+        """Write the labeling back into the apairo dataset as a per-frame `channel`.
+
+        `mode="grid"` projects each frame's BEV raster onto that frame's `reference` points;
+        `mode="points"` writes the hand-painted point labels (the `reference` slice of the
+        per-frame concatenation). Labels align to `reference` by timestamp, and prior saves
+        are preserved (see `adapters.apairo_writer`). Returns a small save report.
+        """
+        from ..adapters.apairo_writer import (
+            project_grid_labels,
+            reference_slice,
+            write_channel,
+        )
+
+        meta = self.apairo_meta()
+        if not meta.get("is_apairo"):
+            raise ValueError("the current source is not an apairo dataset")
+        reference = reference or meta.get("reference")
+        if reference is None:
+            raise ValueError("no reference channel to align the labels to")
+        if reference not in self.cloud_keys:
+            raise ValueError(f"reference '{reference}' is not a point-cloud channel")
+        if mode not in ("grid", "points"):
+            raise ValueError("mode must be 'grid' or 'points'")
+
+        ignore = self.labelset.ignore_id
+        labels_by_ts: dict[float, np.ndarray] = {}
+        for i in range(len(self.source)):
+            frame = self.source[i]
+            ts = frame.timestamp
+            if ts is None:
+                continue  # no timestamp → nothing to align a written frame to
+            ref_pts = frame.channels.get(reference)
+            if ref_pts is None:
+                continue
+            ref_pts = np.asarray(ref_pts)
+            if mode == "grid":
+                if not self.grid_target.has(i):
+                    continue
+                lab = project_grid_labels(ref_pts[:, :2], self.grid_target.raster(i),
+                                          self.grid, ignore)
+            else:  # points
+                full = self.point_target.labels(i)
+                if full is None:
+                    continue
+                sizes = [(k, len(frame.channels[k])) for k in self.cloud_keys
+                         if frame.channels.get(k) is not None and len(frame.channels[k])]
+                lab = reference_slice(np.asarray(full), sizes, reference, ignore)
+                if lab is None:
+                    continue
+            if np.any(lab != ignore):   # skip all-unlabeled frames (keeps prior labels intact)
+                labels_by_ts[ts] = lab
+
+        written = write_channel(meta["write_root"], reference, channel, labels_by_ts)
+        return {"channel": channel, "reference": reference, "mode": mode,
+                "frames": written, "root": meta["write_root"]}
+
     # ============================================================== render
     def view_state(self) -> ViewState:
         """Build the current render state (a single accumulation).

@@ -73,6 +73,11 @@ export const api = {
   load: async (dir) => decodeView(await postJson("/api/load", { dir })),
   export: (dir, name) => postJson("/api/export", { dir, name }),
 
+  // apairo write-back: dataset info, sequence switch (→ ViewState), save labels as a channel.
+  apairoInfo: () => getJson("/api/apairo/info"),
+  apairoSequence: async (sequence) => decodeView(await postJson("/api/apairo/sequence", { sequence })),
+  apairoSave: (channel, reference, mode) => postJson("/api/apairo/save", { channel, reference, mode }),
+
   // File viewer: browse the filesystem and open single files.
   fsList: async (path) => {
     const r = await fetch("/api/fs" + (path ? "?path=" + encodeURIComponent(path) : ""));

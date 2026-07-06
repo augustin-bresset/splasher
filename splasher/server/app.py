@@ -182,6 +182,35 @@ def create_app(session_or_source, *, labels=None):
             raise HTTPException(404, f"cannot load: {e}") from e
         return view()
 
+    # ----------------------------------------------------------- apairo write-back
+    @app.get("/api/apairo/info")
+    def apairo_info() -> dict:
+        """Whether the source is an apairo dataset, + its sequences/reference (for the UI)."""
+        return session.apairo_meta()
+
+    @app.post("/api/apairo/sequence")
+    def apairo_sequence(payload: dict = Body(...)) -> dict:
+        """Load another sequence of the apairo dataset (resets grid + labels)."""
+        try:
+            session.open_apairo_sequence(payload.get("sequence"))
+        except (ValueError, OSError, KeyError) as e:
+            raise HTTPException(422, f"cannot open sequence: {e}") from e
+        return view()
+
+    @app.post("/api/apairo/save")
+    def apairo_save(payload: dict = Body(...)) -> dict:
+        """Write the labeling back into the apairo dataset as a per-frame channel."""
+        try:
+            return session.save_apairo(
+                channel=(payload.get("channel") or "ground_truth"),
+                reference=payload.get("reference"),
+                mode=(payload.get("mode") or "grid"),
+            )
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from e
+        except ImportError as e:
+            raise HTTPException(400, f"apairo is not installed: {e}") from e
+
     # ----------------------------------------------------------- file viewer (browse + open)
     @app.get("/api/fs")
     def fs_list(path: str | None = None) -> dict:

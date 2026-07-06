@@ -111,6 +111,25 @@
           </div>
           <input id="export-name" type="text" placeholder="name_bev.npy" />
           <button id="btn-export" class="btn-primary">Export BEV</button>
+
+          <!-- apairo write-back: shown only when the source is an apairo dataset -->
+          <div id="apairo-box" class="apairo-box" hidden>
+            <div class="apairo-head">📦 apairo dataset <span id="apairo-name" class="muted"></span></div>
+            <label class="row" id="apairo-seq-row">seq
+              <select id="apairo-seq" title="Switch sequence (resets the labeling)"></select>
+            </label>
+            <label class="row">ref
+              <select id="apairo-ref" title="Reference channel: gives each frame its timestamp &amp; order"></select>
+            </label>
+            <div class="row apairo-mode">
+              <label><input type="radio" name="apairo-mode" value="grid" checked /> grid</label>
+              <label><input type="radio" name="apairo-mode" value="points" /> points</label>
+            </div>
+            <input id="apairo-channel" type="text" placeholder="channel (e.g. ground_truth)"
+                   list="apairo-channel-history" spellcheck="false" />
+            <datalist id="apairo-channel-history"></datalist>
+            <button id="btn-apairo-save" class="btn-primary">Write channel</button>
+          </div>
         </section>
       </aside>
 
