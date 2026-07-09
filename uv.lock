@@ -39,8 +39,8 @@ wheels = [
 
 [[package]]
 name = "apairo"
-version = "0.4.0"
-source = { git = "https://github.com/apairo-robotics/apairo.git#2d838c9986bface222b5396206b592fe1e46282c" }
+version = "0.5.0"
+source = { git = "https://github.com/apairo-robotics/apairo.git?rev=v0.5.0#c4fb4d17040bb3e8d54792809ca2f467b5ece2e7" }
 dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
@@ -870,7 +870,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "apairo", marker = "extra == 'apairo'", git = "https://github.com/apairo-robotics/apairo.git" },
+    { name = "apairo", marker = "extra == 'apairo'", git = "https://github.com/apairo-robotics/apairo.git?rev=v0.5.0" },
     { name = "fastapi", marker = "extra == 'api'" },
     { name = "fastapi", marker = "extra == 'app'" },
     { name = "numpy" },
