@@ -65,8 +65,13 @@ class Grid:
     def world_to_cell(self, xy: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """`xy` (N, 2) -> (`ij` (N, 2) int [row, column], `valid` (N,) bool)."""
         xy = np.asarray(xy, dtype=np.float64).reshape(-1, 2)
-        j = np.floor((xy[:, 0] - self.xmin) / self.cell_size).astype(np.intp)
-        i = np.floor((xy[:, 1] - self.ymin) / self.cell_size).astype(np.intp)
+        fj = np.floor((xy[:, 0] - self.xmin) / self.cell_size)
+        fi = np.floor((xy[:, 1] - self.ymin) / self.cell_size)
+        # Casting NaN/inf (invalid lidar returns) to int is undefined and warns;
+        # map them to -1 so they fall out through the `valid` mask instead.
+        finite = np.isfinite(fj) & np.isfinite(fi)
+        j = np.where(finite, fj, -1.0).astype(np.intp)
+        i = np.where(finite, fi, -1.0).astype(np.intp)
         valid = (j >= 0) & (j < self.cols) & (i >= 0) & (i < self.rows)
         return np.stack([i, j], axis=1), valid
 
