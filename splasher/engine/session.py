@@ -22,7 +22,13 @@ from ..core.projection import (
     cells_in_rect,
     points_in_rect,
 )
-from ..core.source import ChannelKind, Source, channels_of_kind
+from ..core.source import (
+    ChannelKind,
+    Source,
+    channels_of_kind,
+    ordered_features,
+    point_features,
+)
 from ..core.target import GridTarget, PointTarget
 from .view_state import SessionInfo, ViewState
 
@@ -54,6 +60,10 @@ class Session:
         self.image_keys = channels_of_kind(source, ChannelKind.IMAGE)
         pose_keys = channels_of_kind(source, ChannelKind.POSE)
         self.pose_key = pose_keys[0] if pose_keys else None
+        # Per-point scalar features (`<cloud>_<suffix>` sibling channels) → trailing columns.
+        self.point_features = point_features(source, self.cloud_keys)
+        self.feature_names = self._feature_names()
+        self.set_bev_mode(self.bev_mode)   # drop a feature underlay the new source no longer has
         self.accum_radius = 0
         self.visible_clouds: set[str] = set(self.cloud_keys)
         self.visible_images: set[str] = set(self.image_keys)
@@ -62,6 +72,20 @@ class Session:
             self.grid = self._default_grid()
             self.grid_target = GridTarget(self.grid, ignore_id=self.labelset.ignore_id)
         self.point_target = PointTarget(ignore_id=self.labelset.ignore_id)
+
+    def _feature_names(self) -> list[str]:
+        """Ordered per-point scalar features the views can color by. Sibling scalar channels
+        (apairo convention) plus, if any cloud has a native 4th column and no sibling one, an
+        `intensity` feature (KITTI-style x,y,z,intensity)."""
+        names = {feat for feats in self.point_features.values() for feat in feats}
+        if "intensity" not in names and len(self.source) and self.cloud_keys:
+            frame = self.source[0]
+            for k in self.cloud_keys:
+                a = frame.channels.get(k)
+                if a is not None and np.asarray(a).ndim == 2 and np.asarray(a).shape[1] >= 4:
+                    names.add("intensity")
+                    break
+        return ordered_features(names)
 
     # ================================================================ info
     def info(self) -> SessionInfo:
@@ -72,6 +96,7 @@ class Session:
             cloud_keys=list(self.cloud_keys),
             image_keys=list(self.image_keys),
             pose_key=self.pose_key,
+            feature_names=list(self.feature_names),
         )
 
     @property
@@ -110,7 +135,9 @@ class Session:
         self.accum_radius = max(0, min(int(radius), cap))
 
     def set_bev_mode(self, mode: str) -> None:
-        self.bev_mode = mode if mode in ("height", "density", "intensity", "normal") else "height"
+        """BEV underlay: 'height' | 'density' | 'normal', or any per-point feature name."""
+        valid = mode in ("height", "density", "normal") or mode in self.feature_names
+        self.bev_mode = mode if valid else "height"
 
     def set_labelset(self, data: dict) -> None:
         """Replace the labeling class set (ids/names/colors). `ignore_id` stays the unlabeled id.
@@ -221,6 +248,86 @@ class Session:
         self.point_target.load_labels(data["point_labels"])
         self.selection = None
 
+    # ============================================================== apairo
+    def apairo_meta(self) -> dict:
+        """Dataset/sequence/reference info when the source is an apairo dataset.
+
+        `{"is_apairo": False}` otherwise (the source exposes no `apairo_meta`), so a front
+        can hide the apairo controls. Duck-typed: the engine never hard-depends on apairo.
+        """
+        meta = getattr(self.source, "apairo_meta", None)
+        return meta() if callable(meta) else {"is_apairo": False}
+
+    def open_apairo_sequence(self, sequence: str | None) -> None:
+        """Load another sequence of the apairo dataset (resets grid + labels).
+
+        A falsy `sequence` (or `"__all__"`) loads the whole dataset as a flat timeline.
+        """
+        if not self.apairo_meta().get("is_apairo"):
+            raise ValueError("the current source is not an apairo dataset")
+        for_sequence = getattr(self.source, "for_sequence", None)
+        if not callable(for_sequence):
+            raise ValueError("this source does not support sequence switching")
+        self.set_source(for_sequence(sequence or None if sequence != "__all__" else None))
+
+    def save_apairo(self, channel: str = "ground_truth", reference: str | None = None,
+                    mode: str = "grid") -> dict:
+        """Write the labeling back into the apairo dataset as a per-frame `channel`.
+
+        `mode="grid"` projects each frame's BEV raster onto that frame's `reference` points;
+        `mode="points"` writes the hand-painted point labels (the `reference` slice of the
+        per-frame concatenation). Labels align to `reference` by timestamp, and prior saves
+        are preserved (see `adapters.apairo_writer`). Returns a small save report.
+        """
+        from ..adapters.apairo_writer import (
+            project_grid_labels,
+            reference_slice,
+            write_channel,
+        )
+
+        meta = self.apairo_meta()
+        if not meta.get("is_apairo"):
+            raise ValueError("the current source is not an apairo dataset")
+        reference = reference or meta.get("reference")
+        if reference is None:
+            raise ValueError("no reference channel to align the labels to")
+        if reference not in self.cloud_keys:
+            raise ValueError(f"reference '{reference}' is not a point-cloud channel")
+        if mode not in ("grid", "points"):
+            raise ValueError("mode must be 'grid' or 'points'")
+
+        ignore = self.labelset.ignore_id
+        labels_by_ts: dict[float, np.ndarray] = {}
+        for i in range(len(self.source)):
+            frame = self.source[i]
+            ts = frame.timestamp
+            if ts is None:
+                continue  # no timestamp → nothing to align a written frame to
+            ref_pts = frame.channels.get(reference)
+            if ref_pts is None:
+                continue
+            ref_pts = np.asarray(ref_pts)
+            if mode == "grid":
+                if not self.grid_target.has(i):
+                    continue
+                lab = project_grid_labels(ref_pts[:, :2], self.grid_target.raster(i),
+                                          self.grid, ignore)
+            else:  # points
+                full = self.point_target.labels(i)
+                if full is None:
+                    continue
+                sizes = [(k, len(frame.channels[k])) for k in self.cloud_keys
+                         if frame.channels.get(k) is not None and len(frame.channels[k])]
+                lab = reference_slice(np.asarray(full), sizes, reference, ignore)
+                if lab is None:
+                    continue
+            if np.any(lab != ignore):   # skip all-unlabeled frames (keeps prior labels intact)
+                labels_by_ts[ts] = lab
+
+        written = write_channel(meta["write_root"], reference, channel, labels_by_ts)
+        return {"channel": channel, "reference": reference, "mode": mode,
+                "frames": written, "root": meta["write_root"]}
+
     # ============================================================== render
     def view_state(self) -> ViewState:
         """Build the current render state (a single accumulation).
@@ -259,7 +366,7 @@ class Session:
             points=pts,
             point_labels=plabels,
             point_channels=pchans,
-            bev_field=bev_field(acc.points[vis], self.grid, self.bev_mode),
+            bev_field=bev_field(acc.points[vis], self.grid, self.bev_mode, self.feature_names),
             grid_labels=grid_labels,
             selection=self.selection,
             images=images,
@@ -292,11 +399,14 @@ class Session:
         """Accumulate over **all** cloud channels (stable point_id); ±radius via poses."""
         n = len(self.source)
         if n == 0:
-            return accumulate(self.source, self.index, [], self.cloud_keys, self.pose_key)
+            return accumulate(self.source, self.index, [], self.cloud_keys, self.pose_key,
+                              self.point_features, self.feature_names)
         if self.accum_radius > 0 and self.pose_key is not None:
             idx = window_indices(self.index, self.accum_radius, n)
-            return accumulate(self.source, self.index, idx, self.cloud_keys, self.pose_key)
-        return accumulate(self.source, self.index, [self.index], self.cloud_keys, self.pose_key)
+            return accumulate(self.source, self.index, idx, self.cloud_keys, self.pose_key,
+                              self.point_features, self.feature_names)
+        return accumulate(self.source, self.index, [self.index], self.cloud_keys, self.pose_key,
+                          self.point_features, self.feature_names)
 
     def _accumulated_labels(self, acc: Accumulation) -> np.ndarray:
         """Per-point labels aligned with `acc.points` (ignore_id by default, reverse de-accumulation)."""

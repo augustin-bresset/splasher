@@ -313,3 +313,15 @@ html[data-theme="pixel"] .brand .pixelwave { animation: pixbob 0.8s steps(2) inf
 ::-webkit-scrollbar { width: 9px; height: 9px; }
 ::-webkit-scrollbar-thumb { background: var(--line-strong); }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* apairo write-back block (Session panel) */
+.apairo-box {
+  margin-top: 10px; padding: 8px; border: 1px solid var(--accent);
+  border-radius: var(--radius); display: flex; flex-direction: column; gap: 6px;
+}
+.apairo-head { font-size: 11px; letter-spacing: 0.4px; }
+.apairo-box .row { display: flex; align-items: center; gap: 6px; }
+.apairo-box .row select { flex: 1; }
+.apairo-mode { gap: 12px; font-size: 12px; color: var(--muted); }
+.apairo-mode label { display: flex; align-items: center; gap: 4px; }
+.apairo-box .btn-primary { margin-top: 2px; }

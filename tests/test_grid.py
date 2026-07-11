@@ -29,6 +29,15 @@ def test_world_to_cell():
     assert valid.tolist() == [True, True, False, False]
 
 
+def test_world_to_cell_non_finite():
+    g = Grid(0.0, 10.0, 0.0, 10.0, 1.0)
+    xy = np.array([[np.nan, 5.0], [5.0, np.inf], [-np.inf, np.nan], [2.5, 3.5]])
+    with np.errstate(invalid="raise"):
+        ij, valid = g.world_to_cell(xy)
+    assert valid.tolist() == [False, False, False, True]
+    assert ij[3].tolist() == [3, 2]
+
+
 def test_cell_to_world_roundtrip():
     g = Grid(-5.0, 5.0, -5.0, 5.0, 2.0)
     x, y = g.cell_to_world(0, 0)

@@ -28,8 +28,10 @@ class Grid:
     cell_size: float
 
     def __post_init__(self) -> None:
-        if self.cell_size <= 0:
-            raise ValueError("cell_size must be > 0")
+        if not math.isfinite(self.cell_size) or self.cell_size <= 0:
+            raise ValueError("cell_size must be a finite number > 0")
+        if not all(math.isfinite(v) for v in (self.xmin, self.xmax, self.ymin, self.ymax)):
+            raise ValueError("extent must be finite (no NaN/inf bounds)")
         if self.xmax <= self.xmin or self.ymax <= self.ymin:
             raise ValueError("invalid extent (xmax > xmin and ymax > ymin required)")
 
@@ -63,8 +65,13 @@ class Grid:
     def world_to_cell(self, xy: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """`xy` (N, 2) -> (`ij` (N, 2) int [row, column], `valid` (N,) bool)."""
         xy = np.asarray(xy, dtype=np.float64).reshape(-1, 2)
-        j = np.floor((xy[:, 0] - self.xmin) / self.cell_size).astype(np.intp)
-        i = np.floor((xy[:, 1] - self.ymin) / self.cell_size).astype(np.intp)
+        fj = np.floor((xy[:, 0] - self.xmin) / self.cell_size)
+        fi = np.floor((xy[:, 1] - self.ymin) / self.cell_size)
+        # Casting NaN/inf (invalid lidar returns) to int is undefined and warns;
+        # map them to -1 so they fall out through the `valid` mask instead.
+        finite = np.isfinite(fj) & np.isfinite(fi)
+        j = np.where(finite, fj, -1.0).astype(np.intp)
+        i = np.where(finite, fi, -1.0).astype(np.intp)
         valid = (j >= 0) & (j < self.cols) & (i >= 0) & (i < self.rows)
         return np.stack([i, j], axis=1), valid
 
@@ -101,8 +108,13 @@ class Grid:
 
 def grid_from_points(xy: np.ndarray, cell_size: float = 1.0,
                      margin: float = 2.0) -> Grid:
-    """Default grid enclosing a top-down point cloud `xy` (N, 2)."""
+    """Default grid enclosing a top-down point cloud `xy` (N, 2).
+
+    Non-finite points (NaN/inf, common for invalid lidar returns) are ignored; if none
+    remain, a neutral default extent is returned rather than a NaN grid.
+    """
     xy = np.asarray(xy, dtype=np.float64).reshape(-1, 2)
+    xy = xy[np.isfinite(xy).all(axis=1)]
     if len(xy) == 0:
         return Grid(-10.0, 10.0, -10.0, 10.0, cell_size)
     lo = np.floor(xy.min(axis=0) - margin)

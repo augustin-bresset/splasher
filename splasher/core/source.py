@@ -79,3 +79,34 @@ def channels_of_kind(source_or_specs, kind: ChannelKind) -> list[str]:
     else:
         specs = source_or_specs
     return [s.name for s in specs if s.kind == kind]
+
+
+def point_features(source_or_specs, cloud_keys) -> dict[str, dict[str, str]]:
+    """Per-point scalar features of each cloud, by the `<cloud>_<suffix>` naming convention.
+
+    A `(N,)` scalar stored beside a cloud is exposed as a channel named `<cloud>_<suffix>`
+    (apairo's suffixed sub-channels — e.g. `velodyne_0` + `velodyne_0_intensity`). Such a
+    scalar is a per-point attribute of `<cloud>`, usable to drive the color gradient.
+
+    Returns `{cloud_key: {feature_name: scalar_channel_key}}` — one entry per sibling scalar
+    (feature name = the suffix). Clouds with no sibling scalar are absent. Nothing is
+    hard-coded to `intensity`; any suffix is honored.
+    """
+    specs: Iterable[ChannelSpec]
+    specs = source_or_specs.channels() if hasattr(source_or_specs, "channels") else source_or_specs
+    scalar_names = {s.name for s in specs
+                    if s.kind not in (ChannelKind.POINTCLOUD, ChannelKind.IMAGE, ChannelKind.POSE)}
+    out: dict[str, dict[str, str]] = {}
+    for cloud in cloud_keys:
+        prefix = f"{cloud}_"
+        feats = {n[len(prefix):]: n for n in scalar_names if n.startswith(prefix) and n != cloud}
+        if feats:
+            out[cloud] = feats
+    return out
+
+
+def ordered_features(names) -> list[str]:
+    """Stable display/column order for feature names: `intensity` first (so it keeps the 4th
+    column the BEV underlay reads), then the rest alphabetically."""
+    names = set(names)
+    return (["intensity"] if "intensity" in names else []) + sorted(names - {"intensity"})

@@ -19,6 +19,7 @@ let bev = null, manager = null, lut = null;
 let playTimer = null;
 let fsPath = null;        // current directory in the file browser
 let fileMode = false;     // empty launch → file-viewer mode (clouds = references, grid persists)
+let apairo = null;        // apairo dataset info (when the source is one), else {is_apairo:false}
 
 function currentTheme() {
   let t = null;
@@ -69,6 +70,7 @@ async function boot() {
 
   buildClasses();
   buildClouds();
+  buildBevModes();
   buildAddBar();
   buildThemeSelect();
   applyTheme(currentTheme());     // sets data-theme + 3D background before panels are added
@@ -87,6 +89,7 @@ async function boot() {
   apply(first);
   fillGridForm(first.grid);
   updateDims(readGridForm());
+  await refreshApairo();                           // show the apairo block if the source is one
 
   await restoreWorkspace();                       // reopen views + restore layout from last session
   window.addEventListener("beforeunload", saveWorkspace);
@@ -134,6 +137,20 @@ function buildClasses() {
   }
 }
 
+// BEV underlay modes: Height, one entry per per-point feature (intensity, range…), Normal.
+function buildBevModes() {
+  const sel = $("bev-mode");
+  const opts = [["height", "Height"],
+                ...(session.feature_names || []).map((n) => [n, pretty(n)]),
+                ["normal", "Normal"]];
+  sel.replaceChildren();
+  for (const [value, label] of opts) {
+    const o = document.createElement("option");
+    o.value = value; o.textContent = label;
+    sel.appendChild(o);
+  }
+}
+
 function buildClouds() {
   const box = $("clouds");
   box.innerHTML = "";
@@ -168,13 +185,16 @@ function pickClouds() {
   return [...$("clouds").querySelectorAll("input[data-name]:checked")].map((cb) => cb.dataset.name);
 }
 
-// File-viewer: send the checked open clouds as the (labelable) session source.
-function updateSourceFromClouds() {
-  const paths = [...$("clouds").querySelectorAll("input[data-path]:checked")].map((cb) => cb.dataset.path);
-  const clouds = manager.openClouds();
-  const first = clouds.find((c) => paths.includes(c.path));
+// File-viewer: send the checked open clouds (with their attached measures) as the
+// (labelable) session source.
+async function updateSourceFromClouds() {
+  const checked = new Set([...$("clouds").querySelectorAll("input[data-path]:checked")].map((cb) => cb.dataset.path));
+  const clouds = manager.openClouds().filter((c) => checked.has(c.path));
+  const first = clouds[0];
   if (first) $("export-name").value = first.name.replace(/\.[^.]+$/, "") + "_bev.npy";
-  run(api.cmd("/api/source/files", { paths }));
+  await run(api.cmd("/api/source/files", { paths: clouds.map((c) => ({ path: c.path, features: c.features })) }));
+  session = await api.session();   // the combined source's feature list may have changed
+  buildBevModes();
 }
 
 // Open/close of a file view → refresh the clouds selector, the source, and the open-list.
@@ -191,7 +211,7 @@ function saveWorkspace() {
   try {
     const grow = (sel) => parseFloat(getComputedStyle(document.querySelector(sel)).flexGrow) || 1;
     localStorage.setItem(WS_KEY, JSON.stringify({
-      files: manager.openFiles().map((f) => f.path),
+      files: manager.openFiles().map((f) => ({ path: f.path, features: f.features || [] })),
       dir: fsPath,
       layout: {
         rail: document.querySelector(".rail").getBoundingClientRect().width,
@@ -213,8 +233,11 @@ async function restoreWorkspace() {
   }
   if (fileMode && ws.files && ws.files.length) {
     const cb = manager.onFiles; manager.onFiles = null;        // bulk: refresh once at the end
-    for (const path of ws.files) {
-      try { manager.addFile(await api.fsOpen(path)); } catch { /* file gone/changed */ }
+    for (const item of ws.files) {                             // legacy entries are plain paths
+      const path = typeof item === "string" ? item : item.path;
+      const features = (typeof item === "string" ? null : item.features) || [];
+      try { manager.addFile(await api.fsOpen(path, features), features); }
+      catch { /* file gone/changed */ }
     }
     manager.onFiles = cb;
     onFilesChanged();
@@ -254,6 +277,48 @@ function setupRanges() {
   $("accum").max = Math.min(last, 50);    // capped: large accumulation is meaningless + costly
   $("accum").disabled = !session.has_pose;
   if (!session.has_pose) $("accum-panel").style.opacity = 0.5;
+}
+
+// ------------------------------------------------- apairo write-back (optional)
+const APAIRO_HIST_KEY = "splasher-apairo-channels";
+const apairoHistory = () => {
+  try { return JSON.parse(localStorage.getItem(APAIRO_HIST_KEY) || "[]"); } catch { return []; }
+};
+function rememberApairoChannel(name) {
+  if (!name) return;
+  const hist = [name, ...apairoHistory().filter((n) => n !== name)].slice(0, 8);
+  try { localStorage.setItem(APAIRO_HIST_KEY, JSON.stringify(hist)); } catch { /* ignore */ }
+  fillApairoHistory();
+}
+function fillApairoHistory() {
+  const opt = (n) => { const o = document.createElement("option"); o.value = n; return o; };
+  $("apairo-channel-history").replaceChildren(...apairoHistory().map(opt));
+}
+
+// Show the apairo block (reference + mode + channel + sequence switch) if the source is one.
+async function refreshApairo() {
+  try { apairo = await api.apairoInfo(); } catch { apairo = { is_apairo: false }; }
+  const box = $("apairo-box");
+  if (!apairo.is_apairo) { box.hidden = true; return; }
+  box.hidden = false;
+  $("apairo-name").textContent = apairo.name || "";
+
+  const mkOpt = (v, t) => { const o = document.createElement("option"); o.value = v; o.textContent = t ?? v; return o; };
+  const seqRow = $("apairo-seq-row"), seqSel = $("apairo-seq");
+  if (apairo.sequences && apairo.sequences.length) {
+    seqRow.hidden = false;
+    seqSel.replaceChildren(mkOpt("__all__", "· all ·"), ...apairo.sequences.map((s) => mkOpt(s)));
+    seqSel.value = apairo.sequence || "__all__";
+  } else {
+    seqRow.hidden = true;
+  }
+
+  const refSel = $("apairo-ref");
+  refSel.replaceChildren(...(apairo.point_channels || []).map((c) => mkOpt(c)));
+  if (apairo.reference) refSel.value = apairo.reference;
+
+  if (!$("apairo-channel").value) $("apairo-channel").value = apairoHistory()[0] || "ground_truth";
+  fillApairoHistory();
 }
 
 // ------------------------------------------------------------- wiring
@@ -323,6 +388,32 @@ function wireControls() {
     catch (e) { $("status").textContent = "⚠ " + e.message; }
   };
 
+  // apairo: switch sequence (resets labeling) and write labels back as a channel.
+  $("apairo-seq").onchange = async (e) => {
+    const seq = e.target.value;
+    if (!confirm("Switch sequence? This resets the current labeling.")) { await refreshApairo(); return; }
+    $("status").textContent = "opening sequence…";
+    try {
+      const v = await api.apairoSequence(seq);
+      session = await api.session();     // frame count changes across sequences
+      setupRanges();
+      fillGridForm(v.grid); apply(v); updateDims(readGridForm());
+      await refreshApairo();
+      $("status").textContent = "opened " + (seq === "__all__" ? "all sequences" : "sequence " + seq);
+    } catch (err) { $("status").textContent = "⚠ " + err.message; await refreshApairo(); }
+  };
+  $("btn-apairo-save").onclick = async () => {
+    const channel = $("apairo-channel").value.trim() || "ground_truth";
+    const reference = $("apairo-ref").value;
+    const mode = document.querySelector('input[name="apairo-mode"]:checked')?.value || "grid";
+    $("status").textContent = "writing apairo channel…";
+    try {
+      const r = await api.apairoSave(channel, reference, mode);
+      rememberApairoChannel(channel);
+      $("status").textContent = `wrote '${r.channel}' (${mode}) — ${r.frames} frame${r.frames === 1 ? "" : "s"}`;
+    } catch (e) { $("status").textContent = "⚠ apairo write failed: " + e.message; }
+  };
+
   // Keyboard shortcuts — ignored while typing in a field.
   window.addEventListener("keydown", (e) => {
     const t = document.activeElement;
@@ -376,6 +467,10 @@ function renderOpenViews() {
     const tag = document.createElement("span");
     tag.className = "fs-open-tag"; tag.textContent = f.type === "file-cloud" ? "3D" : "Img";
     const nm = document.createElement("span"); nm.className = "fs-open-name"; nm.textContent = f.name;
+    if (f.features && f.features.length) {     // attached per-point measures (short paths)
+      nm.textContent += ` (+${f.features.map((p) => p.split("/").slice(-2).join("/")).join(", ")})`;
+      nm.title = f.path + "\n+ " + f.features.join("\n+ ");
+    }
     const x = document.createElement("button");
     x.className = "icon-btn"; x.textContent = "✕"; x.title = "Close view";
     x.onclick = () => { manager.remove(f.id); renderOpenViews(); fsNavigate(fsPath); };
@@ -432,10 +527,34 @@ function fsEntry(e, open) {
 }
 async function openFile(path) {
   try {
-    manager.addFile(await api.fsOpen(path));   // triggers onFiles (clouds + source + open-list)
-    $("fs-error").textContent = "";
-    fsNavigate(fsPath);                        // refresh the "open" markers
+    const res = await api.fsOpen(path);
+    let msg = "";
+    if (res.kind === "feature") msg = await attachFeature(res);   // a lone per-point measure
+    else manager.addFile(res);                 // triggers onFiles (clouds + source + open-list)
+    await fsNavigate(fsPath);                  // refresh the "open" markers
+    $("fs-error").textContent = msg;
   } catch (e) { $("fs-error").textContent = "⚠ " + e.message; }
+}
+
+// A lone (N,) file (labels, intensity…) → attach it as a measure to the open cloud it
+// belongs to: same file stem first (e.g. ground_truth/00123.npy → 00123.npy), else the
+// only open cloud with N points. The cloud recolors by the new measure right away.
+async function attachFeature(res) {
+  const stem = (p) => p.split("/").pop().replace(/\.[^.]+$/, "");
+  const clouds = manager.openClouds().filter((c) => c.nPoints === res.length);
+  if (!clouds.length)
+    throw new Error(`${res.name} holds ${res.length} per-point values — no open cloud has that many points (open the cloud first)`);
+  const fstem = stem(res.path);
+  const byStem = clouds.filter((c) => fstem === stem(c.path) || fstem.startsWith(stem(c.path) + "_"));
+  const target = byStem[0] || (clouds.length === 1 ? clouds[0] : null);
+  if (!target)
+    throw new Error(`${res.length} points match several open clouds (${clouds.map((c) => c.name).join(", ")})`);
+  const features = target.features.includes(res.path) ? target.features : [...target.features, res.path];
+  const spec = await api.fsOpen(target.path, features);
+  const added = (spec.feature_names || []).find((n) => !(target.featureNames || []).includes(n));
+  manager.updateFileCloud(target.id, spec, features, added || null);
+  const short = res.path.split("/").slice(-2).join("/");   // disambiguate same-name files
+  return `✓ ${short} attached to ${target.name}`;
 }
 
 // ------------------------------------------------------------- class editor

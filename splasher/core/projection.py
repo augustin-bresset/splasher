@@ -22,22 +22,13 @@ def points_to_cells(xy: np.ndarray, grid: Grid):
 
 
 def _reduce_per_cell(points: np.ndarray, grid: Grid, op: str) -> np.ndarray:
-    """Reduce a quantity per cell. `op` = 'max_z' | 'count' | 'mean_i'. Empty cells = NaN."""
+    """Reduce a quantity per cell. `op` = 'max_z' | 'count'. Empty cells = NaN."""
     out = np.full(grid.rows * grid.cols, -np.inf if op == "max_z" else 0.0, dtype=np.float64)
     if len(points):
         ij, valid = grid.world_to_cell(points[:, :2])
         flat = ij[valid, 0] * grid.cols + ij[valid, 1]
         if op == "max_z":
             np.maximum.at(out, flat, points[valid, 2])
-        elif op == "mean_i":
-            intensity = points[valid, 3] if points.shape[1] > 3 else np.zeros(valid.sum())
-            counts = np.zeros_like(out)
-            np.add.at(out, flat, intensity)
-            np.add.at(counts, flat, 1.0)
-            with np.errstate(invalid="ignore", divide="ignore"):
-                out = np.where(counts > 0, out / counts, 0.0)
-            out[counts == 0] = np.nan
-            return out.reshape(grid.shape)
         else:
             np.add.at(out, flat, 1.0)
     out = out.reshape(grid.shape)
@@ -58,19 +49,36 @@ def bev_count(points: np.ndarray, grid: Grid) -> np.ndarray:
     return _reduce_per_cell(points, grid, "count")
 
 
-def bev_mean_intensity(points: np.ndarray, grid: Grid) -> np.ndarray:
-    """`(rows, cols)` float: mean intensity (4th column) per cell, NaN if empty / no intensity."""
-    return _reduce_per_cell(points, grid, "mean_i")
+def bev_mean(points: np.ndarray, grid: Grid, col: int) -> np.ndarray:
+    """`(rows, cols)` float: mean of column `col` per cell (a per-point feature, e.g. intensity).
+
+    NaN feature values are excluded from the mean (a point that lacks the feature does not
+    poison its cell); cells with no finite value stay NaN (transparent)."""
+    out = np.zeros(grid.rows * grid.cols, dtype=np.float64)
+    counts = np.zeros_like(out)
+    if len(points) and points.shape[1] > col:
+        ij, valid = grid.world_to_cell(points[:, :2])
+        vals = points[valid, col]
+        finite = np.isfinite(vals)
+        flat = (ij[valid, 0] * grid.cols + ij[valid, 1])[finite]
+        np.add.at(out, flat, vals[finite])
+        np.add.at(counts, flat, 1.0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        out = np.where(counts > 0, out / counts, np.nan)
+    return out.reshape(grid.shape)
 
 
-def bev_field(points: np.ndarray, grid: Grid, mode: str = "height") -> np.ndarray:
-    """BEV scalar field for `mode`: 'height' | 'intensity' | 'density' | 'normal' (no underlay)."""
+def bev_field(points: np.ndarray, grid: Grid, mode: str = "height",
+              feature_names: list[str] | None = None) -> np.ndarray:
+    """BEV scalar field for `mode`: 'height' | 'density' | 'normal' (no underlay), or any
+    per-point feature name in `feature_names` (mean of its column). Unknown → height."""
     if mode == "density":
         return bev_count(points, grid)
-    if mode == "intensity":
-        return bev_mean_intensity(points, grid)
     if mode == "normal":
         return np.full(grid.shape, np.nan, dtype=np.float64)  # no scalar underlay, points only
+    names = list(feature_names or [])
+    if mode in names:
+        return bev_mean(points, grid, 3 + names.index(mode))
     return bev_max_height(points, grid)
 
 

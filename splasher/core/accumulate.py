@@ -11,6 +11,12 @@ accumulated point keeps:
 This makes it possible to **de-accumulate** labels painted on the accumulated cloud back
 to each source frame, and to **filter by channel** without ever misaligning the point
 labels (which stay sized on the full concatenation).
+
+Each accumulated point is `[x, y, z, *features]`: the trailing columns are the per-point
+scalar features named by `feature_names` (a global, ordered list). Each cloud fills the
+features it has — from a sibling scalar channel (`feature_map`, the `<cloud>_<suffix>`
+convention), or a native 4th column for `intensity` — and `NaN` for the rest. Fixing the
+column layout across clouds keeps heterogeneous native widths concatenable.
 """
 
 from __future__ import annotations
@@ -48,9 +54,36 @@ def window_indices(ref_idx: int, radius: int, n_frames: int) -> list[int]:
     return list(range(lo, hi))
 
 
+def _feature_column(frame, cloud_key: str, p: np.ndarray, feature: str,
+                    feature_map: dict[str, dict[str, str]] | None) -> np.ndarray:
+    """One feature column `(m,)` for a cloud channel: its sibling scalar channel for that
+    feature, else a native 4th column (for `intensity` only), else `NaN`. Mismatched-length
+    siblings are ignored (fall through)."""
+    m = len(p)
+    sk = (feature_map or {}).get(cloud_key, {}).get(feature)
+    if sk is not None:
+        s = frame.channels.get(sk)
+        if s is not None:
+            s = np.asarray(s).reshape(-1)
+            if len(s) == m:
+                return s.astype(np.float64)
+    if feature == "intensity" and p.ndim == 2 and p.shape[1] >= 4:
+        return np.asarray(p[:, 3], dtype=np.float64)   # KITTI-style x,y,z,intensity
+    return np.full(m, np.nan)
+
+
 def accumulate(source, ref_idx: int, indices: list[int], cloud_keys: list[str],
-               pose_key: str | None = None) -> Accumulation:
-    """Accumulate `indices` into the frame of `ref_idx`. `pose_key=None` -> identity."""
+               pose_key: str | None = None,
+               feature_map: dict[str, dict[str, str]] | None = None,
+               feature_names: list[str] | None = None) -> Accumulation:
+    """Accumulate `indices` into the frame of `ref_idx`. `pose_key=None` -> identity.
+
+    `feature_map` maps a cloud channel to its sibling per-point scalar channels (see
+    `core.source.point_features`); `feature_names` is the global, ordered column layout for
+    the trailing scalar columns. Together they fill `[x, y, z, *feature_names]`.
+    """
+    feature_names = list(feature_names or [])
+    width = 3 + len(feature_names)
     p_ref_inv = None
     if pose_key is not None:
         ref_pose = source[ref_idx].channels.get(pose_key)
@@ -76,9 +109,14 @@ def accumulate(source, ref_idx: int, indices: list[int], cloud_keys: list[str],
             p = frame.channels.get(key)
             if p is None or len(p) == 0:
                 continue
-            q = np.asarray(p, dtype=np.float64).copy() if T is None else transform_points(p, T)
+            p = np.asarray(p)
             m = len(p)
-            pts.append(q)
+            xyz = p[:, :3].astype(np.float64) if T is None else transform_points(p, T)[:, :3]
+            block = np.empty((m, width), dtype=np.float64)  # [x, y, z, *features] — uniform layout
+            block[:, :3] = xyz
+            for fi, feat in enumerate(feature_names):
+                block[:, 3 + fi] = _feature_column(frame, key, p, feat, feature_map)
+            pts.append(block)
             fids.append(np.full(m, j, dtype=np.int64))
             cids.append(np.full(m, ci, dtype=np.int64))
             pids.append(offset + np.arange(m, dtype=np.int64))
@@ -94,5 +132,5 @@ def accumulate(source, ref_idx: int, indices: list[int], cloud_keys: list[str],
             counts,
         )
     return Accumulation(
-        np.zeros((0, 3)), np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros(0, np.int64), counts
+        np.zeros((0, width)), np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros(0, np.int64), counts
     )

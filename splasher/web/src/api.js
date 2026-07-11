@@ -73,6 +73,11 @@ export const api = {
   load: async (dir) => decodeView(await postJson("/api/load", { dir })),
   export: (dir, name) => postJson("/api/export", { dir, name }),
 
+  // apairo write-back: dataset info, sequence switch (→ ViewState), save labels as a channel.
+  apairoInfo: () => getJson("/api/apairo/info"),
+  apairoSequence: async (sequence) => decodeView(await postJson("/api/apairo/sequence", { sequence })),
+  apairoSave: (channel, reference, mode) => postJson("/api/apairo/save", { channel, reference, mode }),
+
   // File viewer: browse the filesystem and open single files.
   fsList: async (path) => {
     const r = await fetch("/api/fs" + (path ? "?path=" + encodeURIComponent(path) : ""));
@@ -80,9 +85,11 @@ export const api = {
     if (!r.ok) throw new Error(d.detail || `list failed (${r.status})`);
     return d;
   },
-  fsOpen: async (path) => {
+  // `features`: per-point measure files (any location) to attach to the opened cloud.
+  fsOpen: async (path, features = []) => {
     const r = await fetch("/api/fs/open", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path }),
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(features.length ? { path, features } : { path }),
     });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(d.detail || `open failed (${r.status})`);

@@ -34,6 +34,32 @@ def test_bev_count():
     assert np.isnan(c[1, 1])
 
 
+def test_bev_field_colors_by_feature():
+    from splasher.core.projection import bev_field
+
+    g = _grid()
+    # columns: [x, y, z, intensity, range] — the range of the last point is NaN (feature absent)
+    pts = np.array([
+        [0.5, 0.5, 0.0, 10.0, 1.0],
+        [0.6, 0.6, 0.0, 20.0, 3.0],
+        [3.5, 3.5, 0.0, 5.0, np.nan],
+    ])
+    names = ["intensity", "range"]
+
+    inten = bev_field(pts, g, "intensity", names)
+    assert inten[0, 0] == 15.0            # mean of 10 and 20 in cell (0,0)
+    assert inten[3, 3] == 5.0
+    assert np.isnan(inten[2, 2])          # empty cell
+
+    rng = bev_field(pts, g, "range", names)
+    assert rng[0, 0] == 2.0               # mean of 1 and 3
+    assert np.isnan(rng[3, 3])            # only point there has a NaN range → excluded → NaN cell
+
+    # unknown / absent feature falls back to height (max z)
+    assert np.array_equal(bev_field(pts, g, "nope", names),
+                          bev_field(pts, g, "height", names), equal_nan=True)
+
+
 def test_bev_image_alpha():
     g = _grid()
     pts = np.array([[0.5, 0.5, 1.0]])
