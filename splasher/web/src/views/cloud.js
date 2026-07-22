@@ -1,10 +1,15 @@
-// 3D point cloud (Three.js): free navigation (orbit/zoom/pan). Colored by height (z),
-// overridden by the class color where the point is labeled. Frame: z is up.
+// 3D point cloud on projector's shared octree engine (fast LOD): free navigation
+// (orbit/zoom/pan). Colored by height (z), overridden by the class color where the
+// point is labeled — the labeling stays exactly what the old plain-three view showed,
+// only the renderer underneath changed. Frame: z is up.
 //
 // Each instance can filter on a specific cloud channel (`setChannel`) or show all.
+// The engine (../../engine via `/engine`, served by the server from projector's install)
+// owns the renderer, camera, LOD octree and ground grid; this view owns splasher's
+// semantics: which points to keep, how to color them, and the sensor/ego markers.
 
 import * as THREE from "three";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { Viewer } from "/engine/viewer.js";
 import { viridis, pretty } from "../colors.js";
 
 const SENSOR_COLOR = 0x3b82f6;
@@ -65,52 +70,37 @@ export class CloudView {
     this.channel = null;            // null = all channels, otherwise a cloud_keys index
     this.colorBy = "height";        // "height" (z) | feature index i (column 3+i, if present)
     this._framed = false;           // auto-fit the camera on the first non-empty cloud
-    this._raf = null;               // pending on-demand render, or null (idle = zero GPU work)
     this._disposed = false;
 
-    this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x07090c);
+    // The engine owns renderer/camera/controls/LOD-octree/ground-grid and renders on
+    // demand (parks at idle). Orbit style keeps the world's Z upright, matching the BEV.
+    this.viewer = new Viewer(container);
+    this.viewer.setControlStyle("orbit");
+    this.viewer.setBackground("#07090c");
+    this.viewer.setSizeAttenuation(true);   // point size is metres, shrinks with distance
+    this.viewer.setPointSize(0.18);
 
-    this.camera = new THREE.PerspectiveCamera(55, 1, 0.1, 5000);
-    this.camera.up.set(0, 0, 1);
-    this.camera.position.set(-30, -30, 25);
+    // Splasher furniture, added onto the engine's scene: sensor placement markers and the
+    // ego frame at the origin (X red forward, Y green left, Z blue up — same convention as
+    // the BEV's X/Y arrows, so both views read consistently).
+    this.sensorsGroup = new THREE.Group();
+    this.viewer.scene.add(this.sensorsGroup);
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
-    this.renderer.setPixelRatio(window.devicePixelRatio || 1);
-    container.appendChild(this.renderer.domElement);
+    this._ego = new THREE.AxesHelper(2.2);
+    this.viewer.scene.add(this._ego);
+    this._egoLabel = makeLabel("ego");
+    this._egoLabel.position.set(0, 0, 0.9);
+    this.viewer.scene.add(this._egoLabel);
+    this.viewer.requestRender();
 
-    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-    this.controls.enableDamping = false;   // no inertia: the camera stops as soon as you do
-    this.controls.addEventListener("change", () => this._invalidate());
-
-    const grid = new THREE.GridHelper(200, 40, 0x2a2a30, 0x18181d);
-    grid.rotation.x = Math.PI / 2;
-    this.scene.add(grid);
-
-    this.geom = new THREE.BufferGeometry();
-    const mat = new THREE.PointsMaterial({ size: 0.18, vertexColors: true, sizeAttenuation: true });
-    this.points = new THREE.Points(this.geom, mat);
-    this.points.frustumCulled = false;   // never cull the whole cloud (robust to a bad bounding sphere)
-    this.scene.add(this.points);
-
-    this.sensorsGroup = new THREE.Group();      // sensor placement markers (reference)
-    this.scene.add(this.sensorsGroup);
-
-    // Ego frame at the origin: X red (forward), Y green (left), Z blue (up) — same
-    // convention as the BEV's X/Y arrows, so both views read consistently.
-    this.scene.add(new THREE.AxesHelper(2.2));
-    const ego = makeLabel("ego");
-    ego.position.set(0, 0, 0.9);
-    this.scene.add(ego);
-
-    this._ro = new ResizeObserver(() => this._resize());
+    // Panels resize via splitters (no window resize), so drive the engine from a
+    // container observer.
+    this._ro = new ResizeObserver(() => this.viewer.resize());
     this._ro.observe(container);
-    this._resize();
-    this._invalidate();
   }
 
-  setPalette(p) { this.palette = p; }
-  setBackground(css) { this.scene.background = new THREE.Color(css); this._invalidate(); }
+  setPalette(p) { this.palette = p; this._rebuild(); }
+  setBackground(css) { this.viewer.setBackground(css); }
   setChannel(ch) { this.channel = ch; this._rebuild(); }
 
   // sensors: [{ name, kind, placement }] — placement is a 4x4 (nested) ego pose, or null.
@@ -126,7 +116,7 @@ export class CloudView {
       }
       this.sensorsGroup.add(g);
     }
-    this._invalidate();
+    this.viewer.requestRender();
   }
 
   // Free GPU resources held by the sensor markers (geometries, materials, label textures);
@@ -152,9 +142,16 @@ export class CloudView {
     this._rebuild();
   }
 
+  // Rebuild positions + colors from the current view/channel/coloring and hand them to the
+  // engine. This is where splasher's labeling shows: a labeled point takes its class color,
+  // every other point the viridis height/feature gradient — identical to the old view.
   _rebuild() {
+    if (this._disposed) return;
     const p = this.view && this.view.points;
-    if (!p || p.shape[0] === 0) { this.geom.setDrawRange(0, 0); this._invalidate(); return; }
+    if (!p || p.shape[0] === 0) {
+      this.viewer.setCloud(new Float32Array(0), { octree: false, frame: false });
+      return;
+    }
     const [n, stride] = p.shape;
     const labels = this.view.pointLabels ? this.view.pointLabels.data : null;
     const chans = this.view.pointChannels ? this.view.pointChannels.data : null;
@@ -193,64 +190,26 @@ export class CloudView {
       col[k * 3] = rgb[0] / 255; col[k * 3 + 1] = rgb[1] / 255; col[k * 3 + 2] = rgb[2] / 255;
       k++;
     }
-    // Release the previous attributes' GPU buffers: the renderer only frees them on a
-    // geometry `dispose` event, so replacing attributes without it leaks VRAM per rebuild.
-    this.geom.dispose();
-    this.geom.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-    this.geom.setAttribute("color", new THREE.BufferAttribute(col, 3));
-    this.geom.setDrawRange(0, k);
-    this.geom.computeBoundingSphere();
-    if (!this._framed && k > 0) { this._framed = true; this._fit(this.geom.boundingSphere); }
-    this._invalidate();
-  }
 
-  // Frame the camera on the cloud once, so points are visible wherever they sit in space.
-  _fit(sphere) {
-    if (!sphere || !Number.isFinite(sphere.radius) || sphere.radius <= 0) return;
-    const c = sphere.center, r = sphere.radius;
-    this.controls.target.copy(c);
-    const d = r * 2.2 + 1;
-    this.camera.position.set(c.x - d * 0.7, c.y - d * 0.7, c.z + d * 0.6);
-    this.camera.near = Math.max(0.05, r / 100);
-    this.camera.far = r * 20 + 100;
-    this.camera.updateProjectionMatrix();
-    this.controls.update();
-  }
-
-  _resize() {
-    const w = this.container.clientWidth, h = this.container.clientHeight;
-    if (!w || !h) return;
-    this.renderer.setSize(w, h, false);
-    this.camera.aspect = w / h;
-    this.camera.updateProjectionMatrix();
-    this._invalidate();
-  }
-
-  // On-demand rendering: draw once per dirty mark (camera change, data/appearance change,
-  // resize) instead of a continuous loop. An idle view does zero GPU work.
-  _invalidate() {
-    if (this._raf !== null || this._disposed) return;
-    this._raf = requestAnimationFrame(() => {
-      this._raf = null;
-      this.renderer.render(this.scene, this.camera);
-    });
+    // Only the kept points are fed (all visible), so every alpha is 1 — the engine treats
+    // alpha < 0.5 as invisible/unpickable, but this view pre-filters instead of masking.
+    // Frame the camera once, on the first non-empty cloud; later rebuilds leave it put.
+    const doFrame = !this._framed && k > 0;
+    this.viewer.setCloud(pos, { frame: doFrame });
+    this.viewer.setColors(col, new Float32Array(m).fill(1));
+    if (doFrame) this._framed = true;
   }
 
   dispose() {
     this._disposed = true;
-    if (this._raf !== null) { cancelAnimationFrame(this._raf); this._raf = null; }
     this._ro.disconnect();
-    this.controls.dispose();
+    // Free splasher's furniture (the engine's dispose only frees what it owns).
     this._clearSensors();
-    // Free everything this view put on the GPU (cloud geometry + material, grid, axes, labels).
-    this.scene.traverse((o) => {
-      if (o.geometry) o.geometry.dispose();
-      if (o.material) {
-        if (o.material.map) o.material.map.dispose();
-        o.material.dispose();
-      }
-    });
-    this.renderer.dispose();
-    this.renderer.domElement.remove();
+    this.viewer.scene.remove(this.sensorsGroup);
+    this.viewer.scene.remove(this._ego);
+    this.viewer.scene.remove(this._egoLabel);
+    this._ego.geometry.dispose(); this._ego.material.dispose();
+    this._egoLabel.material.map.dispose(); this._egoLabel.material.dispose();
+    this.viewer.dispose();
   }
 }

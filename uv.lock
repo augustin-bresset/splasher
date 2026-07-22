@@ -350,6 +350,35 @@ wheels = [
 ]
 
 [[package]]
+name = "projector"
+version = "0.1.0"
+source = { editable = "../projector" }
+dependencies = [
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "apairo", marker = "extra == 'apairo'", git = "https://github.com/apairo-robotics/apairo.git?rev=v0.5.0" },
+    { name = "fastapi", marker = "extra == 'api'" },
+    { name = "fastapi", marker = "extra == 'app'" },
+    { name = "numpy" },
+    { name = "pywebview", extras = ["qt"], marker = "extra == 'app'" },
+    { name = "pyyaml", marker = "extra == 'apairo'" },
+    { name = "uvicorn", extras = ["standard"], marker = "extra == 'api'" },
+    { name = "uvicorn", extras = ["standard"], marker = "extra == 'app'" },
+]
+provides-extras = ["apairo", "api", "app"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "httpx2" },
+    { name = "pytest" },
+    { name = "ruff" },
+]
+
+[[package]]
 name = "proxy-tools"
 version = "0.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -853,10 +882,12 @@ apairo = [
 ]
 api = [
     { name = "fastapi" },
+    { name = "projector" },
     { name = "uvicorn" },
 ]
 app = [
     { name = "fastapi" },
+    { name = "projector" },
     { name = "pywebview", extra = ["qt"] },
     { name = "uvicorn" },
 ]
@@ -874,6 +905,8 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'api'" },
     { name = "fastapi", marker = "extra == 'app'" },
     { name = "numpy" },
+    { name = "projector", marker = "extra == 'api'", editable = "../projector" },
+    { name = "projector", marker = "extra == 'app'", editable = "../projector" },
     { name = "pywebview", extras = ["qt"], marker = "extra == 'app'" },
     { name = "pyyaml", marker = "extra == 'apairo'" },
     { name = "uvicorn", marker = "extra == 'api'" },

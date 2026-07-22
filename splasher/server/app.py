@@ -285,8 +285,21 @@ def create_app(session_or_source, *, labels=None):
         session.set_source(ArraySource(specs, [channels]), keep_grid=keep)
         return view()
 
-    # Web front mounted last (on "/"): the /api/* and /docs routes, registered before,
-    # keep priority. `html=True` serves index.html at the root.
+    # Shared point-cloud engine (octree LOD) served straight from projector's install, so
+    # one fix there reaches every consumer. MUST be mounted BEFORE the "/" catch-all below,
+    # or its modules fall through to `index.html`. Degrades gracefully if projector is absent
+    # (the 3D cloud view then 404s its engine import — install `splasher[api]`).
+    try:
+        from projector import web_engine_dir
+
+        engine_dir = _Path(web_engine_dir())
+        if engine_dir.is_dir():
+            app.mount("/engine", StaticFiles(directory=str(engine_dir)), name="engine")
+    except ImportError:
+        pass
+
+    # Web front mounted last (on "/"): the /api/*, /engine and /docs routes, registered
+    # before, keep priority. `html=True` serves index.html at the root.
     if WEB_DIR.is_dir():
         app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
 
