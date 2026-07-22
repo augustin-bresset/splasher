@@ -23,8 +23,8 @@ rising ground exactly like a real ego-relative lidar frame would. Channels:
 from __future__ import annotations
 
 import numpy as np
+from projector import terrain
 
-from . import terrain
 from .core.array_source import ArraySource
 from .core.source import ChannelKind, ChannelSpec
 
