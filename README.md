@@ -17,6 +17,12 @@ short_description: Label synchronized 3D/image channels into a 2D BEV grid
 > Note: the demo serves a **single shared session**, so concurrent visitors edit the same
 > grid. See the [GitHub repo](https://github.com/augustin-bresset/splasher) to run it locally.
 
+> **Branches — this runs on [projector](https://github.com/augustin-bresset/projector).**
+> The 3D engine (and its procedural world / demo) come from the shared **projector**
+> package rather than a private copy — this is where everything is heading. A **`standalone`**
+> branch keeps the earlier self-contained version with **no dependency on projector**;
+> it is deprecated, but kept so you can still try it.
+
 A **labeling** tool with a generic core: you give it a *synchronous dataset* — at each
 timestamp, a **pack of named channels** (3D point cloud, camera image, pose, …) — and you
 label either a **top-down 2D grid (BEV)**, the **3D points** directly, or both.
