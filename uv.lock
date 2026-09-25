@@ -39,12 +39,16 @@ wheels = [
 
 [[package]]
 name = "apairo"
-version = "0.5.0"
-source = { git = "https://github.com/apairo-robotics/apairo.git?rev=v0.5.0#c4fb4d17040bb3e8d54792809ca2f467b5ece2e7" }
+version = "0.8.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/16/e6/577248a4fb9fa528124bda605a9e5bbf1b24109797882c88f76f80e9e8e0/apairo-0.8.0.tar.gz", hash = "sha256:4f47c9ea2465acccd94a53b728084bd97de9a8d46db3a2059dd0d428963dac25", size = 138062, upload-time = "2026-09-02T07:15:11.258Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9e/09/a705a832c9f637747aa1e889198c0d3c13048d02fb402aa936f4c67f894d/apairo-0.8.0-py3-none-any.whl", hash = "sha256:e52f524a2c09111e88c367dcc5d65c95713fb6509d01f3e2b746b732d525e55f", size = 157865, upload-time = "2026-09-02T07:15:09.782Z" },
 ]
 
 [[package]]
@@ -870,7 +874,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "apairo", marker = "extra == 'apairo'", git = "https://github.com/apairo-robotics/apairo.git?rev=v0.5.0" },
+    { name = "apairo", marker = "extra == 'apairo'", specifier = ">=0.8" },
     { name = "fastapi", marker = "extra == 'api'" },
     { name = "fastapi", marker = "extra == 'app'" },
     { name = "numpy" },
