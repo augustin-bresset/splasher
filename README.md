@@ -90,6 +90,11 @@ uv sync --extra api     # + headless web/API server (FastAPI + uvicorn)
 uv sync --extra apairo  # + apairo adapter (optional)
 ```
 
+The `app` / `api` extras pull the 3D engine from **projector-engine** (import name
+`projector`), resolved by `[tool.uv.sources]` from a
+[projector](https://github.com/augustin-bresset/projector) checkout next to splasher
+(`../projector`, e.g. `git clone -b v0.1.0 https://github.com/augustin-bresset/projector`).
+
 ## Demo (zero external data)
 
 ```bash

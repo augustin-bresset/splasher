@@ -350,7 +350,7 @@ wheels = [
 ]
 
 [[package]]
-name = "projector"
+name = "projector-engine"
 version = "0.1.0"
 source = { editable = "../projector" }
 dependencies = [
@@ -360,7 +360,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "apairo", marker = "extra == 'apairo'", git = "https://github.com/apairo-robotics/apairo.git?rev=v0.5.0" },
+    { name = "apairo", marker = "extra == 'apairo'", specifier = ">=0.8" },
     { name = "fastapi", marker = "extra == 'api'" },
     { name = "fastapi", marker = "extra == 'app'" },
     { name = "numpy" },
@@ -374,8 +374,9 @@ provides-extras = ["apairo", "api", "app"]
 [package.metadata.requires-dev]
 dev = [
     { name = "httpx2" },
+    { name = "pre-commit" },
     { name = "pytest" },
-    { name = "ruff" },
+    { name = "ruff", specifier = "==0.15.22" },
 ]
 
 [[package]]
@@ -882,12 +883,12 @@ apairo = [
 ]
 api = [
     { name = "fastapi" },
-    { name = "projector" },
+    { name = "projector-engine" },
     { name = "uvicorn" },
 ]
 app = [
     { name = "fastapi" },
-    { name = "projector" },
+    { name = "projector-engine" },
     { name = "pywebview", extra = ["qt"] },
     { name = "uvicorn" },
 ]
@@ -905,8 +906,8 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'api'" },
     { name = "fastapi", marker = "extra == 'app'" },
     { name = "numpy" },
-    { name = "projector", marker = "extra == 'api'", editable = "../projector" },
-    { name = "projector", marker = "extra == 'app'", editable = "../projector" },
+    { name = "projector-engine", marker = "extra == 'api'", editable = "../projector" },
+    { name = "projector-engine", marker = "extra == 'app'", editable = "../projector" },
     { name = "pywebview", extras = ["qt"], marker = "extra == 'app'" },
     { name = "pyyaml", marker = "extra == 'apairo'" },
     { name = "uvicorn", marker = "extra == 'api'" },

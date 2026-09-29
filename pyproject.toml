@@ -28,12 +28,13 @@ apairo = [
     "PyYAML",
 ]
 # Web server + API (the `splasher.engine` core does not depend on it).
-# projector ships the shared three.js point-cloud engine the 3D cloud view runs on
+# projector-engine (import name `projector`; the PyPI name `projector` is an unrelated
+# package) ships the shared three.js point-cloud engine the 3D cloud view runs on
 # (served via `projector.web_engine_dir()`); install it editable from the sibling checkout.
 api = [
     "fastapi",
     "uvicorn",
-    "projector",
+    "projector-engine",
 ]
 # Desktop app: the web front inside a native webview (Spotify-style).
 # pywebview[qt] pulls a pip-only Qt WebEngine (Chromium) backend so a real native
@@ -42,7 +43,7 @@ app = [
     "fastapi",
     "uvicorn",
     "pywebview[qt]",
-    "projector",
+    "projector-engine",
 ]
 
 [project.scripts]
@@ -62,7 +63,7 @@ ignore = ["B008"]  # `= Body(...)` in defaults is the intended FastAPI idiom
 # projector (the shared engine) is co-developed locally in ~/dev; resolve the
 # dependency from the sibling checkout (editable) rather than from an index.
 [tool.uv.sources]
-projector = { path = "../projector", editable = true }
+projector-engine = { path = "../projector", editable = true }
 
 [build-system]
 requires = ["hatchling"]

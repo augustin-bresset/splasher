@@ -11,8 +11,22 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.11", "3.12"]
+    # [tool.uv.sources] resolves projector-engine from ../projector (the ~/dev
+    # sibling layout), so check out both repos side by side and run in splasher/.
+    defaults:
+      run:
+        working-directory: splasher
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: splasher
+      # Pinned to a release tag so a projector push can't break splasher's CI —
+      # bump it when splasher needs a newer engine.
+      - uses: actions/checkout@v4
+        with:
+          repository: augustin-bresset/projector
+          ref: v0.1.0
+          path: projector
       - name: Install uv
         uses: astral-sh/setup-uv@v5
       - name: Lint
